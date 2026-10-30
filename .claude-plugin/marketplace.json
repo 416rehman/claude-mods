@@ -1,0 +1,12 @@
+{
+  "name": "claude-mods",
+  "owner": { "name": "416rehman" },
+  "description": "Mods for Claude Code.",
+  "plugins": [
+    {
+      "name": "copy-kit",
+      "source": "./copy-kit",
+      "description": "Copy any section of a reply, or check several and copy them together, and copy the path of the conversation's transcript."
+    }
+  ]
+}
