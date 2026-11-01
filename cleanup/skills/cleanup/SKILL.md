@@ -337,8 +337,9 @@ the pass:
    command is never seen.
 
 Commits whose diff adds no lines to source files (docs, config, pure
-deletions) are never gated. Never sign off without running the pass: the
-sign-off is the pass's signature, not a bypass.
+deletions) are never gated. When the gate can't check a commit (git too slow,
+say), it denies it and says why: run the command again. Never sign off without
+running the pass: the sign-off is the pass's signature, not a bypass.
 
 ## Output
 

@@ -1,26 +1,19 @@
 #!/usr/bin/env node
 'use strict';
 /*
- * cleanup-gate.js - Claude Code PreToolUse hook (matcher: Bash|PowerShell), registered by
- * the cleanup plugin's hooks/hooks.json.
+ * PreToolUse hook (Bash|PowerShell) of the cleanup plugin: denies a `git commit`
+ * until the cleanup skill has signed off on exactly what is being committed.
  *
- * Denies a `git commit` until the cleanup skill has signed off on the exact content
- * being committed, then lets it through.
+ *   node cleanup-gate.js              hook mode, reads the hook's JSON on stdin
+ *   node cleanup-gate.js --mark DIR   signs off the repo at DIR
  *
- *   node cleanup-gate.js              hook mode: reads the hook JSON on stdin
- *   node cleanup-gate.js --mark DIR   sign-off: records the hashes for the repo at DIR
+ * The sign-off, <git-dir>/cleanup.ok, holds the sha256 of `git diff --cached`
+ * ("cached") and of `git diff HEAD` ("tracked"). A plain commit must match
+ * "cached"; `commit -a` or a commit with pathspecs must match "tracked". Commits
+ * that add no lines to source files are never gated.
  *
- * The sign-off is <git-dir>/cleanup.ok, two lines: "cached <sha256 of git diff
- * --cached>" and "tracked <sha256 of git diff HEAD>". A plain commit must match "cached",
- * `commit -a` (or a commit with pathspecs) must match "tracked", so any edit after the
- * sign-off gates the next commit again. Commits that add no lines to source files are
- * never gated.
- *
- * `git add` commands chained before the commit in the same tool call are replayed into a
- * scratch copy of the index, so the gate sees what the index will hold when the commit runs.
- *
- * Fails open: an internal error is appended to ~/.claude/cleanup-gate.log (not beside this
- * file, which may sit in a repository) and the commit proceeds.
+ * Once it has found a commit, a check that fails (git timed out, say) denies it:
+ * a gate that lets a commit through whenever git is slow checks nothing.
  */
 
 const fs = require('fs');
@@ -31,8 +24,12 @@ const { execFileSync } = require('child_process');
 
 const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
 const MARKER = 'cleanup.ok';
+// Not beside this file, which may sit in a repository.
 const LOG = path.join(os.homedir(), '.claude', 'cleanup-gate.log');
-const GIT_TIMEOUT_MS = 10000;
+const IS_MARK = process.argv[2] === '--mark';
+// The hook must answer inside the 60 s hooks.json gives it, so a slow git ends
+// in a deny, not a killed hook. A sign-off is a tool call, with 2 minutes.
+const DEADLINE = Date.now() + (IS_MARK ? 100000 : 50000);
 const CODE_EXT = new Set((
   'c cc cpp cxx h hh hpp hxx cs csx cshtml razor fs fsx vb java kt kts scala groovy gradle ' +
   'go rs swift m mm js jsx mjs cjs ts tsx mts cts vue svelte astro py pyi rb php pl pm lua r jl dart ' +
@@ -52,7 +49,6 @@ function log(msg) {
 }
 
 function sha(s) { return crypto.createHash('sha256').update(s).digest('hex'); }
-function fwd(p) { return p.replace(/\\/g, '/'); }
 
 // Git Bash spells D:\x as /d/x; git.exe spawned from node needs the Windows form.
 function nativePath(p) {
@@ -66,16 +62,25 @@ function git(cwd, args, extraEnv) {
     cwd,
     encoding: 'utf8',
     maxBuffer: 512 * 1024 * 1024,
-    timeout: GIT_TIMEOUT_MS,
+    timeout: Math.max(1, DEADLINE - Date.now()),
     stdio: ['ignore', 'pipe', 'pipe'],
     env: Object.assign({}, process.env, { GIT_OPTIONAL_LOCKS: '0', GIT_PAGER: 'cat' }, extraEnv || {}),
   });
 }
 
-// Splits a command line into simple commands (arrays of words). Quotes group words; an
-// unquoted newline ; | or & ends a command (so && and || do too). Backslash is literal
-// except \" inside double quotes, so Windows paths survive and a heredoc commit message
-// stays inside its quotes.
+// Null when git exits non-zero. A timeout has no exit status, so it still throws.
+function gitOrNull(cwd, args, extraEnv) {
+  try {
+    return git(cwd, args, extraEnv);
+  } catch (e) {
+    if (typeof e.status === 'number') return null;
+    throw e;
+  }
+}
+
+// Splits a command line into simple commands (arrays of words). An unquoted
+// newline, ; | or & ends one. Backslash is literal except \" inside double
+// quotes, so Windows paths survive and a heredoc message stays in its quotes.
 function splitCommands(s) {
   const cmds = [[]];
   let cur = '';
@@ -101,8 +106,7 @@ function splitCommands(s) {
   return cmds.filter((c) => c.length);
 }
 
-// Walks the simple commands in order, tracking `cd`, and returns the first `git commit`
-// with the directory it runs in and the `git add` commands chained before it.
+// The first `git commit`, with the directory it runs in and the `git add`s chained before it.
 function findCommit(command, startDir) {
   let dir = startDir;
   const adds = [];
@@ -148,32 +152,29 @@ function findCommit(command, startDir) {
 }
 
 function resolveRepo(dir) {
-  try {
-    return {
-      top: git(dir, ['rev-parse', '--show-toplevel']).trim(),
-      gitDir: git(dir, ['rev-parse', '--absolute-git-dir']).trim(),
-    };
-  } catch (_) { return null; }
+  if (!fs.existsSync(dir)) return null;
+  const top = gitOrNull(dir, ['rev-parse', '--show-toplevel']);
+  if (top === null) return null;
+  return { top: top.trim(), gitDir: git(dir, ['rev-parse', '--absolute-git-dir']).trim() };
 }
 
 function baseRef(repo) {
-  try { git(repo.top, ['rev-parse', '--verify', '-q', 'HEAD']); return 'HEAD'; } catch (_) { return EMPTY_TREE; }
+  return gitOrNull(repo.top, ['rev-parse', '--verify', '-q', 'HEAD']) === null ? EMPTY_TREE : 'HEAD';
 }
 
-// Replays chained `git add` commands into a scratch copy of the index. Returns the scratch
-// index path (caller removes it) or null when there is nothing to replay.
+// The whole command is checked before any of it runs, so its `git add`s are
+// replayed into a copy of the index. The caller removes the copy.
 function replayAdds(repo, adds) {
   if (!adds.length) return null;
   const tmp = path.join(os.tmpdir(), `cleanup-gate-${process.pid}-${Date.now()}.index`);
   try { fs.copyFileSync(path.join(repo.gitDir, 'index'), tmp); } catch (_) { /* fresh repo: no index yet */ }
   for (const a of adds) {
-    try { git(a.dir, ['add', ...a.args], { GIT_INDEX_FILE: tmp }); } catch (e) { log(`replay add ${a.args.join(' ')}: ${e.message}`); }
+    if (gitOrNull(a.dir, ['add', ...a.args], { GIT_INDEX_FILE: tmp }) === null) log(`replay add ${a.args.join(' ')} failed`);
   }
   return tmp;
 }
 
-function diffs(repo, env) {
-  const base = baseRef(repo);
+function diffs(repo, base, env) {
   const opts = ['--no-color', '--no-ext-diff'];
   return {
     cached: git(repo.top, ['diff', '--cached', base, ...opts], env),
@@ -181,14 +182,13 @@ function diffs(repo, env) {
   };
 }
 
-function codeFilesWithAddedLines(repo, all, env) {
-  const base = baseRef(repo);
+function codeFilesWithAddedLines(repo, base, all, env) {
   const args = all ? ['diff', base, '--numstat'] : ['diff', '--cached', base, '--numstat'];
   const files = [];
   for (const line of git(repo.top, args, env).split('\n')) {
     const parts = line.split('\t');
     if (parts.length < 3) continue;
-    const added = parseInt(parts[0], 10); // '-' for binary -> NaN -> skipped
+    const added = parseInt(parts[0], 10); // a binary file shows '-', which parses to NaN
     if (!(added > 0)) continue;
     let file = parts.slice(2).join('\t').replace(/\{[^}]* => ([^}]*)\}/g, '$1');
     const arrow = file.lastIndexOf(' => ');
@@ -223,7 +223,7 @@ function reason(repo, c, files) {
   if (c.adds.length) steps.push('Run the git add part of your command by itself first: the whole command was denied, so nothing is staged yet.');
   steps.push(`Invoke the cleanup skill via the Skill tool (skill: "cleanup:cleanup", args: "${target}"). It covers only ${diffCmd} in ${repo.top}.`);
   steps.push('git add every file the pass edited, so the cleaned version is what gets committed.');
-  steps.push(`Sign off: node "${fwd(__filename)}" --mark "${repo.top}"`);
+  steps.push(`Sign off: node "${__filename.replace(/\\/g, '/')}" --mark "${repo.top}"`);
   return [
     `CLEANUP GATE: this commit adds source lines in ${files.length} file(s) (${list}) that have not had a cleanup pass. Do these steps in order, then re-run the same commit command:`,
     ...steps.map((s, i) => `${i + 1}. ${s}`),
@@ -248,27 +248,23 @@ function mark(dirArg) {
     process.stderr.write(`cleanup gate: ${dir} is not inside a git repository\n`);
     process.exit(1);
   }
-  const d = diffs(repo);
+  const d = diffs(repo, baseRef(repo));
   writeMarker(repo, d);
   process.stdout.write(`cleanup gate: signed off ${repo.top} (staged ${sha(d.cached).slice(0, 12)}, tracked ${sha(d.tracked).slice(0, 12)})\n`);
 }
 
-function hook() {
-  let input;
-  try { input = JSON.parse(fs.readFileSync(0, 'utf8')); } catch (_) { return; }
-  if (!input || (input.tool_name !== 'Bash' && input.tool_name !== 'PowerShell')) return;
-  const command = input.tool_input && input.tool_input.command;
-  if (typeof command !== 'string' || !/\bcommit\b/.test(command)) return;
-  const c = findCommit(command, nativePath(input.cwd || process.cwd()));
+function check(command, cwd) {
+  const c = findCommit(command, nativePath(cwd));
   if (!c || c.dryRun) return;
   const repo = resolveRepo(c.dir);
   if (!repo) return;
   const tmpIndex = replayAdds(repo, c.adds);
   const env = tmpIndex ? { GIT_INDEX_FILE: tmpIndex } : undefined;
   try {
-    const files = codeFilesWithAddedLines(repo, c.all, env);
+    const base = baseRef(repo);
+    const files = codeFilesWithAddedLines(repo, base, c.all, env);
     if (!files.length) return;
-    const d = diffs(repo, env);
+    const d = diffs(repo, base, env);
     const key = c.all ? 'tracked' : 'cached';
     if (readMarker(repo)[key] === sha(d[key])) return;
     deny(reason(repo, c, files));
@@ -277,9 +273,26 @@ function hook() {
   }
 }
 
-const argv = process.argv.slice(2);
-try {
-  if (argv[0] === '--mark') mark(argv[1]); else hook();
-} catch (e) {
-  log(`error: ${(e && e.stack) || e}`);
+function hook() {
+  let input;
+  try { input = JSON.parse(fs.readFileSync(0, 'utf8')); } catch (_) { return; }
+  const command = input && input.tool_input && input.tool_input.command;
+  if (typeof command !== 'string' || !/\bcommit\b/.test(command)) return;
+  try {
+    check(command, input.cwd || process.cwd());
+  } catch (e) {
+    log(`error: ${(e && e.stack) || e}`);
+    deny(`CLEANUP GATE: the gate could not check this command (${e.message}), so it was not run. Run the same command again. If it keeps failing, tell the user: disabling the cleanup plugin turns the gate off.`);
+  }
+}
+
+if (IS_MARK) {
+  try {
+    mark(process.argv[3]);
+  } catch (e) {
+    process.stderr.write(`cleanup gate: sign-off failed: ${e.message}\n`);
+    process.exit(1);
+  }
+} else {
+  hook();
 }

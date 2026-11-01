@@ -7,7 +7,7 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/cleanup-gate.js\"",
-            "timeout": 15,
+            "timeout": 60,
             "statusMessage": "cleanup gate"
           }
         ]
