@@ -5,14 +5,14 @@ import { regionIcon } from './shared/icons'
 type CopyIconProps = { index: number; isGlyph?: boolean }
 type CopyIconState = { isChecked: boolean }
 
-const CHECKED_MS = 1500
+const CHECK_SHOWN_MS = 1500
 
 const CopyIcon: ClientModule<CopyIconProps, CopyIconState> = (props, surface) => {
   surface.onPointer(event => {
     if (event.type !== 'down' || event.button !== 'left') return
     surface.post({ copy: props.index })
     surface.setState({ isChecked: true })
-    const stop = surface.every(CHECKED_MS, () => {
+    const stop = surface.every(CHECK_SHOWN_MS, () => {
       stop()
       surface.setState({ isChecked: false })
     })

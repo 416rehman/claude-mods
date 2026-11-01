@@ -17,7 +17,7 @@ const transcriptPath = atom(
 )
 
 // Cached, so typing in the filter doesn't run git on every key.
-let branch: { root: string; name: string | null; at: number } | undefined
+let branchCache: { root: string; name: string | null; at: number } | undefined
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
@@ -47,10 +47,10 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Pane', requestId: 'claude-mods' }, async ($, e, next) => {
     if (e.surface !== 'desktop') return next(e)
-    const el = $.ui.resolve(e)
-    const { rows } = await whereabouts($)
+    const elements = $.ui.resolve(e)
+    const { rows } = await readWhereabouts($)
     const heading = { plugin: 'whereabouts', icon: 'mapPin', title: 'Whereabouts' } as const
-    return withModsSection(el, await next(e), sectionCard(el, heading, rows))
+    return withModsSection(elements, await next(e), sectionCard(elements, heading, rows))
   })
 
   on('ui.message', { component: 'Pane' }, async ($, e, next) => {
@@ -60,7 +60,7 @@ export const register: Register = on => {
       toggleFold($)
       return {}
     }
-    const { values, path } = await whereabouts($)
+    const { values, path } = await readWhereabouts($)
     if (post.id === 'open') {
       if (path !== null) await reveal($, path)
       return {}
@@ -78,18 +78,18 @@ export const register: Register = on => {
   // A failure here must never block the session's own hooks.
   on('classic.SessionStart', async ($, e, next) => {
     const result = await next(e)
-    await remember($, e.transcript_path, e.agent_id)
+    await rememberTranscriptPath($, e.transcript_path, e.agent_id)
     return result
   }).catch(($, e, next) => next(e))
 
   on('classic.UserPromptSubmit', async ($, e, next) => {
     const result = await next(e)
-    await remember($, e.transcript_path, e.agent_id)
+    await rememberTranscriptPath($, e.transcript_path, e.agent_id)
     return result
   }).catch(($, e, next) => next(e))
 }
 
-async function whereabouts($: EngineInterface): Promise<{
+async function readWhereabouts($: EngineInterface): Promise<{
   rows: SectionRow[]
   values: Map<string, { label: string; text: string }>
   path: string | null
@@ -132,12 +132,12 @@ async function whereabouts($: EngineInterface): Promise<{
 
 async function branchOf($: EngineInterface, root: string): Promise<string | null> {
   const now = await $.clock.now()
-  if (branch !== undefined && branch.root === root && now - branch.at < 5000) return branch.name
-  const read = await $.process
+  if (branchCache !== undefined && branchCache.root === root && now - branchCache.at < 5000) return branchCache.name
+  const head = await $.process
     .run(['git', '-C', root, 'rev-parse', '--abbrev-ref', 'HEAD'], { timeoutMs: 5000 })
     .catch(() => null)
-  const name = read?.exitCode === 0 ? read.stdout.trim() || null : null
-  branch = { root, name, at: now }
+  const name = head?.exitCode === 0 ? head.stdout.trim() || null : null
+  branchCache = { root, name, at: now }
   return name
 }
 
@@ -184,7 +184,7 @@ async function reveal($: EngineInterface, path: string) {
   }
 }
 
-async function remember(
+async function rememberTranscriptPath(
   $: EngineInterface,
   path: string | undefined,
   agentId: string | undefined,
@@ -205,14 +205,14 @@ async function locateTranscript($: EngineInterface): Promise<string | null> {
 
   const projects = join(config, 'projects')
   const file = `${await $.session.id()}.jsonl`
-  const likely = [await $.session.root(), await $.session.cwd()].map(dir =>
+  const likelyFolders = [await $.session.root(), await $.session.cwd()].map(dir =>
     dir.replace(/[^a-zA-Z0-9]/g, '-'),
   )
-  const listed = await $.fs.list(projects).catch(() => [])
+  const entries = await $.fs.list(projects).catch(() => [])
   const folders = [
     ...new Set([
-      ...likely,
-      ...listed.filter(entry => entry.kind === 'dir').map(entry => entry.name),
+      ...likelyFolders,
+      ...entries.filter(entry => entry.kind === 'dir').map(entry => entry.name),
     ]),
   ]
 

@@ -20,7 +20,7 @@ const FILTER_KEY = 'claude-mods-filter'
 let query = ''
 let isFolded = false
 
-export type El = ElementTable<'desktop'>
+export type Elements = ElementTable<'desktop'>
 
 function containsKey(node: unknown, key: string): boolean {
   if (typeof node !== 'object' || node === null) return false
@@ -44,12 +44,12 @@ export function setFilter($: EngineInterface, value: string): void {
   $.ui.invalidate('ui.render')
 }
 
-export function withModsButton($: EngineInterface, el: El, theirs: RenderElement): RenderElement {
-  if (containsKey(theirs, OPEN_KEY)) return theirs
-  const { Box, Button } = el
+export function withModsButton($: EngineInterface, elements: Elements, drawnBelow: RenderElement): RenderElement {
+  if (containsKey(drawnBelow, OPEN_KEY)) return drawnBelow
+  const { Box, Button } = elements
   return (
     <Box flexDirection="row" alignItems="center" columnGap={1}>
-      {theirs}
+      {drawnBelow}
       <Box flexShrink={0}>
         <Button key={OPEN_KEY} label="Mods" plain dimColor onPress={() => togglePanel($)} />
       </Box>
@@ -63,14 +63,14 @@ async function togglePanel($: EngineInterface): Promise<void> {
   else await $.ui.open({ id: PANE_ID, title: 'Mods' })
 }
 
-export function withModsSection(el: El, theirs: RenderElement, section: RenderNode | null): RenderElement {
-  const { Box, Input } = el
-  const isLowest = !containsKey(theirs, FILTER_KEY)
+export function withModsSection(elements: Elements, drawnBelow: RenderElement, section: RenderNode | null): RenderElement {
+  const { Box, Input } = elements
+  const isLowest = !containsKey(drawnBelow, FILTER_KEY)
   return (
     <Box flexDirection="column" rowGap="lg" paddingY="sm">
       {isLowest && (
         <Box key={FILTER_KEY + '-row'} flexDirection="row" alignItems="center" columnGap={1} paddingX={1}>
-          {icon(el, 'search', 16)}
+          {icon(elements, 'search', 16)}
           <Box flexGrow={1} minWidth={0}>
             <Input
               key={FILTER_KEY}
@@ -82,19 +82,19 @@ export function withModsSection(el: El, theirs: RenderElement, section: RenderNo
           </Box>
         </Box>
       )}
-      {!(isLowest && isEngineDrawing(theirs)) && theirs}
+      {!(isLowest && isEngineDrawing(drawnBelow)) && drawnBelow}
       {section}
     </Box>
   )
 }
 
-export function icon(el: El, name: IconName, size = 14): RenderElement {
-  const { Svg } = el
+export function icon(elements: Elements, name: IconName, size = 14): RenderElement {
+  const { Svg } = elements
   return <Svg source={iconSource(name)} alt={name} width={size} height={size} />
 }
 
 export function sectionCard(
-  el: El,
+  elements: Elements,
   heading: { plugin: string; icon: IconName; title: string },
   rows: readonly SectionRow[],
 ): RenderElement | null {
@@ -102,7 +102,7 @@ export function sectionCard(
   if (query !== '' && shown.length === 0) return null
   const isCollapsed = isFolded && query === ''
   const props: SectionProps = { title: heading.title, icon: heading.icon, isCollapsed, rows: shown }
-  const { Box, Client } = el
+  const { Box, Client } = elements
   return (
     <Box key={`claude-mods-card-${heading.plugin}`} flexDirection="column" borderStyle="round" borderDimColor>
       <Client

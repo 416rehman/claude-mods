@@ -30,9 +30,9 @@ const CHECKED_BOX = '☑\u{FE0E}'
 // bullet and indent are the engine's.
 const HOVER_SURFACES: ReadonlySet<string> = new Set(['desktop', 'vscode'])
 
-const GUTTER = 8
+const ICONS_WIDTH = 8
 
-const COPIED: Record<SectionKind, string> = {
+const COPIED_TOAST: Record<SectionKind, string> = {
   quote: 'Quote copied',
   code: 'Code copied',
   heading: 'Heading copied',
@@ -43,8 +43,8 @@ const COPIED: Record<SectionKind, string> = {
 // Translucent, because the desktop draws a text selection beneath the
 // background. Other surfaces may not take an alpha colour, so only the desktop
 // is tinted.
-const HOVERED = 'rgba(128, 128, 128, 0.08)'
-const PICKED = 'rgba(128, 128, 128, 0.16)'
+const HOVER_TINT = 'rgba(128, 128, 128, 0.08)'
+const PICKED_TINT = 'rgba(128, 128, 128, 0.16)'
 
 export const register: Register = on => {
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
@@ -74,9 +74,9 @@ export const register: Register = on => {
           const tint = !isTinted
             ? {}
             : isPicked
-              ? { backgroundColor: PICKED }
+              ? { backgroundColor: PICKED_TINT }
               : canPick
-                ? { hover: { backgroundColor: HOVERED } }
+                ? { hover: { backgroundColor: HOVER_TINT } }
                 : {}
           return (
             <Box key={`section-${index}`} flexDirection="row" paddingX={1} {...tint}>
@@ -84,7 +84,7 @@ export const register: Register = on => {
                 <Markdown text={section.markdown} />
               </Box>
               {/* Both show on hover; a checked box stays shown, its copy icon still on hover. */}
-              <Box width={GUTTER} flexShrink={0} flexDirection="row" justifyContent="flex-end">
+              <Box width={ICONS_WIDTH} flexShrink={0} flexDirection="row" justifyContent="flex-end">
                 {canPick && (
                   <Box
                     flexDirection="row"
@@ -112,7 +112,7 @@ export const register: Register = on => {
                           plain
                           dimColor
                           onPress={press =>
-                            copy($, section.plain!, press.surface, COPIED[section.kind])
+                            copy($, section.plain!, press.surface, COPIED_TOAST[section.kind])
                           }
                         />
                       )}
@@ -161,13 +161,13 @@ export const register: Register = on => {
     const checked = await read($, picks)
     if (checked.length === 0 || e.props.hasSurvey) return next(e)
 
-    const theirs = await next(e)
+    const drawnBelow = await next(e)
     const { Box, Button, Text } = $.ui.resolve(e)
     const count = checked.length
 
     return (
       <Box flexDirection="column">
-        {theirs}
+        {drawnBelow}
         <Box flexDirection="row" alignItems="center" gap={1}>
           <Text>
             {count} {count === 1 ? 'section' : 'sections'} selected
@@ -198,9 +198,9 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Pane', requestId: 'claude-mods' }, async ($, e, next) => {
     if (e.surface !== 'desktop') return next(e)
-    const el = $.ui.resolve(e)
+    const elements = $.ui.resolve(e)
     const heading = { plugin: 'cherrypick', icon: 'checklist', title: 'Cherrypick' } as const
-    return withModsSection(el, await next(e), sectionCard(el, heading, cherrypickRows(await read($, picks))))
+    return withModsSection(elements, await next(e), sectionCard(elements, heading, cherrypickRows(await read($, picks))))
   })
 
   on('ui.message', { component: 'Pane' }, async ($, e, next) => {
@@ -312,8 +312,8 @@ async function copy(
   $: EngineInterface,
   text: string,
   surface: RenderSurface,
-  done: string,
+  doneToast: string,
 ) {
   const copied = await $.ui.copy({ text, surface })
-  $.ui.toast(copied.isCopied ? done : `Nothing was copied (${copied.reason})`)
+  $.ui.toast(copied.isCopied ? doneToast : `Nothing was copied (${copied.reason})`)
 }

@@ -44,17 +44,17 @@ const ADD_INTERACTIVE = new Set(['-p', '--patch', '-i', '--interactive', '-e', '
 const COMMIT_OPT_WITH_VALUE = new Set(['-m', '-F', '-t', '-C', '-c', '--message', '--file', '--template',
   '--author', '--date', '--fixup', '--squash', '--cleanup', '--trailer', '--reuse-message', '--reedit-message']);
 
-function log(msg) {
-  try { fs.appendFileSync(LOG, `${new Date().toISOString()} ${msg}\n`); } catch (_) { /* nowhere to report */ }
+function log(message) {
+  try { fs.appendFileSync(LOG, `${new Date().toISOString()} ${message}\n`); } catch (_) { /* nowhere to report */ }
 }
 
-function sha(s) { return crypto.createHash('sha256').update(s).digest('hex'); }
+function sha(text) { return crypto.createHash('sha256').update(text).digest('hex'); }
 
 // Git Bash spells D:\x as /d/x; git.exe spawned from node needs the Windows form.
-function nativePath(p) {
-  if (p === '~' || p.startsWith('~/')) p = os.homedir() + p.slice(1);
-  const m = /^\/([a-zA-Z])(\/.*)?$/.exec(p);
-  return m ? `${m[1].toUpperCase()}:${m[2] || '/'}` : p;
+function nativePath(filePath) {
+  if (filePath === '~' || filePath.startsWith('~/')) filePath = os.homedir() + filePath.slice(1);
+  const drive = /^\/([a-zA-Z])(\/.*)?$/.exec(filePath);
+  return drive ? `${drive[1].toUpperCase()}:${drive[2] || '/'}` : filePath;
 }
 
 function git(cwd, args, extraEnv) {
@@ -81,29 +81,29 @@ function gitOrNull(cwd, args, extraEnv) {
 // Splits a command line into simple commands (arrays of words). An unquoted
 // newline, ; | or & ends one. Backslash is literal except \" inside double
 // quotes, so Windows paths survive and a heredoc message stays in its quotes.
-function splitCommands(s) {
-  const cmds = [[]];
-  let cur = '';
+function splitCommands(line) {
+  const commands = [[]];
+  let word = '';
   let quote = null;
   let inWord = false;
-  const endWord = () => { if (inWord) cmds[cmds.length - 1].push(cur); cur = ''; inWord = false; };
-  const endCommand = () => { endWord(); if (cmds[cmds.length - 1].length) cmds.push([]); };
-  for (let i = 0; i < s.length; i++) {
-    const ch = s[i];
+  const endWord = () => { if (inWord) commands[commands.length - 1].push(word); word = ''; inWord = false; };
+  const endCommand = () => { endWord(); if (commands[commands.length - 1].length) commands.push([]); };
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
     if (quote) {
       if (ch === quote) quote = null;
-      else if (ch === '\\' && quote === '"' && s[i + 1] === '"') { cur += '"'; i++; }
-      else cur += ch;
+      else if (ch === '\\' && quote === '"' && line[i + 1] === '"') { word += '"'; i++; }
+      else word += ch;
       continue;
     }
     if (ch === '"' || ch === "'") { quote = ch; inWord = true; continue; }
     if (ch === '\n' || ch === ';' || ch === '|' || ch === '&') { endCommand(); continue; }
     if (/\s/.test(ch)) { endWord(); continue; }
-    cur += ch;
+    word += ch;
     inWord = true;
   }
   endCommand();
-  return cmds.filter((c) => c.length);
+  return commands.filter((words) => words.length);
 }
 
 // The first `git commit`, with the directory it runs in and the `git add`s chained before it.
@@ -118,20 +118,20 @@ function findCommit(command, startDir) {
       continue;
     }
     if (!GIT_EXE.test(words[0])) continue;
-    let cdir = dir;
+    let runDir = dir;
     let i = 1;
     for (; i < words.length && words[i].startsWith('-'); i++) {
       if (GIT_OPT_WITH_VALUE.has(words[i])) {
-        if (words[i] === '-C' && words[i + 1]) cdir = path.resolve(cdir, nativePath(words[i + 1]));
+        if (words[i] === '-C' && words[i + 1]) runDir = path.resolve(runDir, nativePath(words[i + 1]));
         i++;
       }
     }
-    const sub = words[i];
+    const subcommand = words[i];
     const rest = words.slice(i + 1);
-    if (sub === 'add' || sub === 'stage') {
+    if (subcommand === 'add' || subcommand === 'stage') {
       if (rest.some((w) => ADD_INTERACTIVE.has(w))) return null;
-      adds.push({ dir: cdir, args: rest });
-    } else if (sub === 'commit') {
+      adds.push({ dir: runDir, args: rest });
+    } else if (subcommand === 'commit') {
       let all = false;
       let dryRun = false;
       for (let j = 0; j < rest.length; j++) {
@@ -145,7 +145,7 @@ function findCommit(command, startDir) {
           if (/[mFCct]/.test(w)) j++;
         } else if (!w.startsWith('-')) all = true; // pathspec: commits working-tree content
       }
-      return { dir: cdir, all, dryRun, adds };
+      return { dir: runDir, all, dryRun, adds };
     }
   }
   return null;
@@ -166,19 +166,19 @@ function baseRef(repo) {
 // replayed into a copy of the index. The caller removes the copy.
 function replayAdds(repo, adds) {
   if (!adds.length) return null;
-  const tmp = path.join(os.tmpdir(), `cleanup-gate-${process.pid}-${Date.now()}.index`);
-  try { fs.copyFileSync(path.join(repo.gitDir, 'index'), tmp); } catch (_) { /* fresh repo: no index yet */ }
-  for (const a of adds) {
-    if (gitOrNull(a.dir, ['add', ...a.args], { GIT_INDEX_FILE: tmp }) === null) log(`replay add ${a.args.join(' ')} failed`);
+  const scratchIndex = path.join(os.tmpdir(), `cleanup-gate-${process.pid}-${Date.now()}.index`);
+  try { fs.copyFileSync(path.join(repo.gitDir, 'index'), scratchIndex); } catch (_) { /* fresh repo: no index yet */ }
+  for (const add of adds) {
+    if (gitOrNull(add.dir, ['add', ...add.args], { GIT_INDEX_FILE: scratchIndex }) === null) log(`replay add ${add.args.join(' ')} failed`);
   }
-  return tmp;
+  return scratchIndex;
 }
 
 function diffs(repo, base, env) {
-  const opts = ['--no-color', '--no-ext-diff'];
+  const flags = ['--no-color', '--no-ext-diff'];
   return {
-    cached: git(repo.top, ['diff', '--cached', base, ...opts], env),
-    tracked: git(repo.top, ['diff', base, ...opts], env),
+    cached: git(repo.top, ['diff', '--cached', base, ...flags], env),
+    tracked: git(repo.top, ['diff', base, ...flags], env),
   };
 }
 
@@ -201,32 +201,32 @@ function codeFilesWithAddedLines(repo, base, all, env) {
 function markerPath(repo) { return path.join(repo.gitDir, MARKER); }
 
 function readMarker(repo) {
-  const m = {};
+  const signed = {};
   try {
     for (const line of fs.readFileSync(markerPath(repo), 'utf8').split('\n')) {
-      const [k, v] = line.trim().split(' ');
-      if (k && v) m[k] = v;
+      const [key, hash] = line.trim().split(' ');
+      if (key && hash) signed[key] = hash;
     }
   } catch (_) { /* no sign-off yet */ }
-  return m;
+  return signed;
 }
 
-function writeMarker(repo, d) {
-  fs.writeFileSync(markerPath(repo), `cached ${sha(d.cached)}\ntracked ${sha(d.tracked)}\n`);
+function writeMarker(repo, diff) {
+  fs.writeFileSync(markerPath(repo), `cached ${sha(diff.cached)}\ntracked ${sha(diff.tracked)}\n`);
 }
 
-function reason(repo, c, files) {
-  const target = c.all ? 'tracked' : 'staged';
-  const diffCmd = c.all ? 'git diff HEAD' : 'git diff --cached';
+function reason(repo, commit, files) {
+  const target = commit.all ? 'tracked' : 'staged';
+  const diffCommand = commit.all ? 'git diff HEAD' : 'git diff --cached';
   const list = files.slice(0, 8).join(', ') + (files.length > 8 ? `, +${files.length - 8} more` : '');
   const steps = [];
-  if (c.adds.length) steps.push('Run the git add part of your command by itself first: the whole command was denied, so nothing is staged yet.');
-  steps.push(`Invoke the cleanup skill via the Skill tool (skill: "cleanup:cleanup", args: "${target}"). It covers only ${diffCmd} in ${repo.top}.`);
+  if (commit.adds.length) steps.push('Run the git add part of your command by itself first: the whole command was denied, so nothing is staged yet.');
+  steps.push(`Invoke the cleanup skill via the Skill tool (skill: "cleanup:cleanup", args: "${target}"). It covers only ${diffCommand} in ${repo.top}.`);
   steps.push('git add every file the pass edited, so the cleaned version is what gets committed.');
   steps.push(`Sign off: node "${__filename.replace(/\\/g, '/')}" --mark "${repo.top}"`);
   return [
     `CLEANUP GATE: this commit adds source lines in ${files.length} file(s) (${list}) that have not had a cleanup pass. Do these steps in order, then re-run the same commit command:`,
-    ...steps.map((s, i) => `${i + 1}. ${s}`),
+    ...steps.map((step, i) => `${i + 1}. ${step}`),
     'The gate checks before a command runs, so sign off in its own tool call and commit in the next one; a sign-off chained into the commit command is not seen. Any later edit needs another pass. Never sign off without running the pass.',
   ].join('\n');
 }
@@ -248,28 +248,28 @@ function mark(dirArg) {
     process.stderr.write(`cleanup gate: ${dir} is not inside a git repository\n`);
     process.exit(1);
   }
-  const d = diffs(repo, baseRef(repo));
-  writeMarker(repo, d);
-  process.stdout.write(`cleanup gate: signed off ${repo.top} (staged ${sha(d.cached).slice(0, 12)}, tracked ${sha(d.tracked).slice(0, 12)})\n`);
+  const diff = diffs(repo, baseRef(repo));
+  writeMarker(repo, diff);
+  process.stdout.write(`cleanup gate: signed off ${repo.top} (staged ${sha(diff.cached).slice(0, 12)}, tracked ${sha(diff.tracked).slice(0, 12)})\n`);
 }
 
 function check(command, cwd) {
-  const c = findCommit(command, nativePath(cwd));
-  if (!c || c.dryRun) return;
-  const repo = resolveRepo(c.dir);
+  const commit = findCommit(command, nativePath(cwd));
+  if (!commit || commit.dryRun) return;
+  const repo = resolveRepo(commit.dir);
   if (!repo) return;
-  const tmpIndex = replayAdds(repo, c.adds);
-  const env = tmpIndex ? { GIT_INDEX_FILE: tmpIndex } : undefined;
+  const scratchIndex = replayAdds(repo, commit.adds);
+  const env = scratchIndex ? { GIT_INDEX_FILE: scratchIndex } : undefined;
   try {
     const base = baseRef(repo);
-    const files = codeFilesWithAddedLines(repo, base, c.all, env);
+    const files = codeFilesWithAddedLines(repo, base, commit.all, env);
     if (!files.length) return;
-    const d = diffs(repo, base, env);
-    const key = c.all ? 'tracked' : 'cached';
-    if (readMarker(repo)[key] === sha(d[key])) return;
-    deny(reason(repo, c, files));
+    const diff = diffs(repo, base, env);
+    const key = commit.all ? 'tracked' : 'cached';
+    if (readMarker(repo)[key] === sha(diff[key])) return;
+    deny(reason(repo, commit, files));
   } finally {
-    if (tmpIndex) { try { fs.unlinkSync(tmpIndex); } catch (_) { /* already gone */ } }
+    if (scratchIndex) { try { fs.unlinkSync(scratchIndex); } catch (_) { /* already gone */ } }
   }
 }
 
