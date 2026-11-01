@@ -35,7 +35,6 @@ const textsOf = async (drawing: Drawing) =>
 
 type Drawn = { props?: Record<string, unknown>; children?: unknown[] }
 
-/** The drawn element keyed `key`. */
 function drawnByKey(node: unknown, key: string): Drawn | undefined {
   if (typeof node !== 'object' || node === null) return undefined
   const element = node as Drawn
@@ -47,7 +46,7 @@ function drawnByKey(node: unknown, key: string): Drawn | undefined {
   return undefined
 }
 
-/** The session this mod reads, as the engine answers for it; `ran` gathers the commands it runs. */
+// `ran` collects the commands the mod runs.
 function aSession(on: On, path: string | null = PATH, ran: string[][] = []) {
   if (path !== null) {
     on('state.get', { plugin: 'whereabouts', key: 'transcriptPath' }, () => ({

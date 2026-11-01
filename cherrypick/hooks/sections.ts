@@ -2,12 +2,8 @@ export type SectionKind = 'quote' | 'code' | 'heading' | 'rule' | 'text'
 
 export type Section = {
   kind: SectionKind
-  /** The section's markdown, exactly as the reply wrote it. */
   markdown: string
-  /**
-   * The section without its markdown markers (a quote's `>`, a code block's
-   * fences, a heading's `#`); null where there is nothing to copy.
-   */
+  /** Without its markers (`>`, fences, `#`); null when nothing is left to copy. */
   plain: string | null
 }
 
@@ -29,13 +25,9 @@ const BLANK = /^[ \t]*$/
 const INDENTED = /^[ \t]/
 
 /**
- * Splits a reply's markdown into the blocks a person would copy one at a time:
- * each quote, code fence, heading and blank-line-separated block of text.
- *
- * Joining every section's markdown with the blank lines between them gives
- * back the reply, so drawing the sections one after another draws the reply.
- * An indented block (a list item's continuation, a nested list) stays with the
- * block above it, since drawn alone it would become a code block.
+ * Joining the sections' markdown with blank lines gives back the reply, so
+ * drawing them one after another draws the reply. An indented block stays with
+ * the block above it: drawn alone, it would become a code block.
  */
 export function splitSections(source: string): Section[] {
   const lines = source.replace(/\r\n?/g, '\n').split('\n')
@@ -104,7 +96,7 @@ export function splitSections(source: string): Section[] {
       return
     }
 
-    // Continues a block of text, or lazily continues a quote's paragraph.
+    // Markdown lets a quoted paragraph's later lines drop the `>`.
     open.end = i
   })
   close()

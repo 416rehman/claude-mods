@@ -1,7 +1,7 @@
 declare module 'claude-code' {
   interface PluginState {
     whereabouts: {
-      /** The main conversation's transcript file, absolute; null until known. */
+      /** The main conversation's transcript, not a subagent's. */
       transcriptPath: string | null
     }
   }

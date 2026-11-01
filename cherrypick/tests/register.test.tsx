@@ -51,7 +51,7 @@ const BAR = {
   },
 } as const
 
-/** The drawn element keyed `key`, with its `hover`, which `find` leaves out. */
+// `find` leaves out `hover`, so these search the drawn tree.
 type Drawn = { props?: Record<string, unknown>; hover?: unknown; children?: unknown[] }
 function drawnByKey(node: unknown, key: string): Drawn | undefined {
   if (typeof node !== 'object' || node === null) return undefined
@@ -64,7 +64,6 @@ function drawnByKey(node: unknown, key: string): Drawn | undefined {
   return undefined
 }
 
-/** The drawn element whose own children hold the element keyed `key`. */
 function parentOfKey(node: unknown, key: string): Drawn | undefined {
   if (typeof node !== 'object' || node === null) return undefined
   const element = node as Drawn
@@ -88,10 +87,8 @@ describe('selecting sections of replies', () => {
 
       const reply = await $.ui.mount({ ...REPLY, surface })
 
-      // A desktop draws a Button's `label` and none of its children, so the
-      // label is what must read right. Three sections to copy or check; the
-      // rule draws but has nothing to copy. The desktop's copy mark is a
-      // region that draws the app's icon; VS Code has no regions, so a Button.
+      // The desktop draws a Button's label, not its children. Of four sections,
+      // the rule has nothing to copy; VS Code has no regions, so its copy is a Button.
       const label = async (key: string) => (await reply.find({ key }))?.props.label
       const labels = (await reply.findAll({ type: 'Button' })).map(button => button.props.label)
       expect(await reply.findAll({ type: 'Markdown' })).toHaveLength(4)
@@ -145,7 +142,6 @@ describe('selecting sections of replies', () => {
     expect(copied).toEqual(['> keep it simple\n\nSo I did.\n\nSecond.'])
     expect(toasts).toEqual(['Copied 3 sections'])
 
-    // Nothing is checked any more: the bar gives way and the boxes are empty.
     expect(await bar.find({ key: 'copy-selected' })).toBeUndefined()
     expect((await first.find({ key: 'pick-1' }))?.text).toBe('☐')
 
@@ -257,7 +253,7 @@ describe('selecting sections of replies', () => {
     await code.pointer({ ...click, in: 'copy-1' })
 
     expect(copied).toEqual(['keep it simple', 'npm test'])
-    // The mark turns to a check instead of a toast, as Claude's own does.
+    // The copy icon shows a check instead, so no toast.
     expect(toasts).toEqual([])
 
     // Nothing was checked, so no bar appears above the prompt.
@@ -280,7 +276,6 @@ describe('selecting sections of replies', () => {
     })
 
     const reply = await $.ui.mount({ ...REPLY, surface: 'desktop' })
-    // The mark is the app's own icon, drawn as an Svg; its alt names which.
     const mark = async () => {
       const icon = await reply.find({ type: 'Svg', in: 'copy-0' })
       return `${icon?.type} ${icon?.props.alt}`
@@ -352,15 +347,14 @@ describe('selecting sections of replies', () => {
     const reply = await $.ui.mount({ ...REPLY, surface: 'desktop' })
     const tree = await reply.drawn()
 
-    // One row holds the checkbox and the box around the copy mark, and it is
-    // the one thing the pointer reveals, so the two appear at once.
+    // One row holds both, so the pointer reveals them together.
     const row = parentOfKey(tree, 'pick-1')
     expect(row?.props?.flexDirection).toBe('row')
     expect(row?.props?.display).toBe('none')
     expect(row?.hover).toEqual({ display: 'flex' })
     expect(parentOfKey(row, 'copy-1')).toBeDefined()
 
-    // Checked, the box stays in view and the copy mark waits for the pointer.
+    // Checked, the box stays shown and the copy icon waits for the pointer.
     await reply.press({ key: 'pick-1' })
     const checked = parentOfKey(await reply.drawn(), 'pick-1')
     expect(checked?.props?.display).toBeUndefined()

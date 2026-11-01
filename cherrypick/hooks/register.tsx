@@ -5,41 +5,31 @@ import type { CherrypickPick } from '../types'
 import { splitSections } from './sections'
 import type { Section, SectionKind } from './sections'
 import {
-  noteFilter,
   readSectionPost,
   sectionCard,
+  setFilter,
   toggleFold,
   withModsButton,
   withModsSection,
 } from './shared/panel'
 import type { SectionRow } from './shared/panel'
 
-// Change the tag when a pick's fields change: it declines what an earlier
-// version stored, which outlives a reload.
+// Bump when a pick's fields change, so values an earlier version stored are dropped.
 const picks = atom({ plugin: 'cherrypick', key: 'picks' } as const, [], {
   shape: 'picks-2',
 })
 
-/** Each reply block's sections as last drawn, so a click on a copy mark knows its section. */
-const drawn = new Map<string, Section[]>()
+const drawnSections = new Map<string, Section[]>()
 
-/** Set once a surface refused the copy icon this load; the copy marks then draw a glyph. */
 let isIconRefused = false
 
-/**
- * The checked box, with the text-style variation selector: Windows otherwise
- * draws U+2611 as a colour emoji tile beside the grey copy mark.
- */
+// U+FE0E asks for text style: Windows draws a bare ☑ as a colour emoji.
 const CHECKED_BOX = '☑\u{FE0E}'
 
-/**
- * Surfaces with a pointer to hover a section with. The terminal keeps its own
- * drawing: its reply bullet and indent are the engine's, and only its
- * fullscreen layout reports the pointer at all.
- */
+// Not the terminal: it reports the pointer only in fullscreen, and its reply
+// bullet and indent are the engine's.
 const HOVER_SURFACES: ReadonlySet<string> = new Set(['desktop', 'vscode'])
 
-/** Cells kept free at each section's right for its copy mark and checkbox. */
 const GUTTER = 8
 
 const COPIED: Record<SectionKind, string> = {
@@ -50,13 +40,9 @@ const COPIED: Record<SectionKind, string> = {
   text: 'Copied',
 }
 
-/**
- * Translucent tints. The desktop paints a text selection as bands in a layer
- * beneath the transcript, so an opaque background over a section hides the
- * person's selection there; these let it show through. A neutral grey at low
- * alpha shades a light theme and lifts a dark one alike. Other surfaces are
- * not known to take an alpha colour, so they draw no tint.
- */
+// Translucent, because the desktop draws a text selection beneath the
+// background. Other surfaces may not take an alpha colour, so only the desktop
+// is tinted.
 const HOVERED = 'rgba(128, 128, 128, 0.08)'
 const PICKED = 'rgba(128, 128, 128, 0.16)'
 
@@ -69,13 +55,12 @@ export const register: Register = on => {
 
     const table = $.ui.resolve(e)
     const { Box, Button, Markdown } = table
-    // A Button draws text alone; a Client region draws the app's own copy icon.
-    // Only the desktop's table holds Client (another surface's runtime table may
-    // carry the key and still refuse it), so elsewhere the mark is a Button.
+    // Other surfaces' tables can list Client and still refuse it, so only the
+    // desktop draws the copy icon; elsewhere it is a ⧉ Button.
     const Client = e.surface === 'desktop' && 'Client' in table ? table.Client : undefined
     const isTinted = e.surface === 'desktop'
     const message = e.requestId
-    drawn.set(message, sections)
+    drawnSections.set(message, sections)
     const picked = new Set(
       (await read($, picks)).filter(pick => pick.message === message).map(pick => pick.index),
     )
@@ -86,7 +71,6 @@ export const register: Register = on => {
           const isPicked = picked.has(index)
           const canPick = section.plain !== null
           const onPress = () => toggle($, message, index, section)
-          // The section under the pointer lifts a shade; a checked one keeps a tint.
           const tint = !isTinted
             ? {}
             : isPicked
@@ -99,9 +83,7 @@ export const register: Register = on => {
               <Box flexGrow={1} flexShrink={1} minWidth={0}>
                 <Markdown text={section.markdown} />
               </Box>
-              {/* Copy takes this section alone, now; the box checks it for the bar
-                  above the prompt. The two share one row; a checked box stays in
-                  view and its copy mark still waits for the pointer. */}
+              {/* Both show on hover; a checked box stays shown, its copy icon still on hover. */}
               <Box width={GUTTER} flexShrink={0} flexDirection="row" justifyContent="flex-end">
                 {canPick && (
                   <Box
@@ -152,21 +134,19 @@ export const register: Register = on => {
     )
   })
 
-  // A click on a section's copy mark. The mark shows the check itself, so only
-  // a copy that failed is worth a word.
+  // The copy icon shows its own check, so only a failed copy gets a toast.
   on('ui.message', { component: 'AssistantMessage' }, async ($, e, next) => {
     const index = copiedIndex(e.data)
     if (index === null) return next(e)
 
-    const plain = drawn.get(e.requestId)?.[index]?.plain
+    const plain = drawnSections.get(e.requestId)?.[index]?.plain
     if (plain === null || plain === undefined) return {}
     const copied = await $.ui.copy({ text: plain, surface: e.surface })
     if (!copied.isCopied) $.ui.toast(`Nothing was copied (${copied.reason})`)
     return {}
   })
 
-  // A surface that cannot draw the copy icon in a region says so here; the
-  // engine then draws the site again, and its marks draw the glyph instead.
+  // A surface that can't draw the copy icon reports it here; the redraw uses the glyph.
   on('ui.fault', ($, e, next) => {
     if (e.module.endsWith('copy-icon.tsx') && !isIconRefused) {
       isIconRefused = true
@@ -177,8 +157,6 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // Shown only while something is checked: what is checked, and what to do with
-  // it, under whatever other plugins draw in the band.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const checked = await read($, picks)
     if (checked.length === 0 || e.props.hasSurvey) return next(e)
@@ -213,7 +191,6 @@ export const register: Register = on => {
     )
   })
 
-  // The footer's Mods button and the Mods sidebar, shared with the other mods.
   on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
     if (e.surface !== 'desktop') return next(e)
     return withModsButton($, $.ui.resolve(e), await next(e))
@@ -226,8 +203,6 @@ export const register: Register = on => {
     return withModsSection(el, await next(e), sectionCard(el, heading, cherrypickRows(await read($, picks))))
   })
 
-  // A click on a row of this mod's section: a checked one is removed; the last
-  // two copy all of them or clear them.
   on('ui.message', { component: 'Pane' }, async ($, e, next) => {
     const post = readSectionPost(e.data)
     if (post === null) return next(e)
@@ -242,7 +217,7 @@ export const register: Register = on => {
   })
 
   on('ui.input', { element: 'claude-mods-filter' }, async ($, e, next) => {
-    noteFilter($, e.value)
+    setFilter($, e.value)
     return next(e)
   })
 }
@@ -255,12 +230,11 @@ const KIND_LABEL: Record<SectionKind, string> = {
   text: 'Text',
 }
 
-/** This mod's section of the Mods sidebar: the checked sections, then what to do with them. */
 function cherrypickRows(checked: readonly CherrypickPick[]): SectionRow[] {
   if (checked.length === 0) {
     return [{ id: 'empty', icon: 'info', label: "Tick ☐ on a part of a reply to collect it.", isHint: true }]
   }
-  const list = [...checked].sort((a, b) => a.messageOrder - b.messageOrder || a.index - b.index)
+  const list = inReplyOrder(checked)
   const count = list.length === 1 ? '1 section' : `${list.length} sections`
   return [
     ...list.map(
@@ -281,7 +255,6 @@ function pickId(pick: CherrypickPick): string {
   return `pick:${pick.message}:${pick.index}`
 }
 
-/** A section's first line, as the sidebar previews it. */
 function firstLine(text: string): string {
   return text.split('\n').find(line => line.trim() !== '')?.trim() ?? ''
 }
@@ -295,9 +268,8 @@ async function toggle($: EngineInterface, message: string, index: number, sectio
   if (plain === null) return
 
   await update($, picks, list => {
-    if (list.some(one => one.message === message && one.index === index)) {
-      return list.filter(one => one.message !== message || one.index !== index)
-    }
+    const rest = list.filter(one => one.message !== message || one.index !== index)
+    if (rest.length < list.length) return rest
     const known = list.find(one => one.message === message)
     const messageOrder =
       known?.messageOrder ?? Math.max(0, ...list.map(one => one.messageOrder)) + 1
@@ -311,15 +283,14 @@ function copiedIndex(data: unknown): number | null {
   return typeof data.copy === 'number' ? data.copy : null
 }
 
-/**
- * The checked sections in the order the replies show them, a blank line apart.
- * Sections all of one kind copy without their markers; a mix keeps every
- * section's markdown, so a code block stays a code block beside the text.
- */
+function inReplyOrder(list: readonly CherrypickPick[]): CherrypickPick[] {
+  return [...list].sort((a, b) => a.messageOrder - b.messageOrder || a.index - b.index)
+}
+
+// A mix keeps every section's markdown, so a code block stays a code block beside text.
 function joinPicks(list: readonly CherrypickPick[]): string {
   const isOneKind = new Set(list.map(one => one.kind)).size === 1
-  return [...list]
-    .sort((a, b) => a.messageOrder - b.messageOrder || a.index - b.index)
+  return inReplyOrder(list)
     .map(one => (isOneKind ? one.plain : one.markdown))
     .join('\n\n')
 }

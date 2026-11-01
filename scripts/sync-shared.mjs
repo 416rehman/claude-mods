@@ -1,10 +1,6 @@
-// Copies shared/ into each mod the marketplace lists, as <mod>/hooks/shared/,
-// so every mod carries the Mods sidebar and none needs another installed. A
-// plugin with no hooks module (a skill, command hooks alone) draws nothing and
-// gets no copy. With --check it writes nothing and fails when any copy differs.
-//
-//   node scripts/sync-shared.mjs
-//   node scripts/sync-shared.mjs --check
+// Copies shared/ into <mod>/hooks/shared/ for each marketplace plugin with a
+// hooks module, so no mod needs another installed. --check writes nothing and
+// fails when a copy differs.
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'

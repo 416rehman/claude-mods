@@ -2,9 +2,9 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderSurface } from 'claude-code'
 
 import {
-  noteFilter,
   readSectionPost,
   sectionCard,
+  setFilter,
   toggleFold,
   withModsButton,
   withModsSection,
@@ -16,7 +16,7 @@ const transcriptPath = atom(
   null,
 )
 
-/** The branch as last read, so typing in the filter does not run git on every key. */
+// Cached, so typing in the filter doesn't run git on every key.
 let branch: { root: string; name: string | null; at: number } | undefined
 
 export const register: Register = on => {
@@ -26,8 +26,8 @@ export const register: Register = on => {
       name: 'transcript',
       description: 'Copy the path of the file this conversation is stored in',
     })
-    // The classic events carry the path from the next prompt on; a mod loaded
-    // into a running session finds the file the session already writes.
+    // The classic events carry the path only from the next prompt, so a mod
+    // loaded mid-session looks for the file.
     if ((await read($, transcriptPath)) === null) {
       const found = await locateTranscript($)
       if (found !== null) await update($, transcriptPath, known => known ?? found)
@@ -40,7 +40,6 @@ export const register: Register = on => {
     return {}
   })
 
-  // The footer's Mods button and the Mods sidebar, shared with the other mods.
   on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
     if (e.surface !== 'desktop') return next(e)
     return withModsButton($, $.ui.resolve(e), await next(e))
@@ -54,7 +53,6 @@ export const register: Register = on => {
     return withModsSection(el, await next(e), sectionCard(el, heading, rows))
   })
 
-  // A click on a row of this mod's section: a part copies, the last opens the folder.
   on('ui.message', { component: 'Pane' }, async ($, e, next) => {
     const post = readSectionPost(e.data)
     if (post === null) return next(e)
@@ -73,11 +71,11 @@ export const register: Register = on => {
   })
 
   on('ui.input', { element: 'claude-mods-filter' }, async ($, e, next) => {
-    noteFilter($, e.value)
+    setFilter($, e.value)
     return next(e)
   })
 
-  // Remembering the path never holds up or refuses the session's own hooks.
+  // A failure here must never block the session's own hooks.
   on('classic.SessionStart', async ($, e, next) => {
     const result = await next(e)
     await remember($, e.transcript_path, e.agent_id)
@@ -91,10 +89,6 @@ export const register: Register = on => {
   }).catch(($, e, next) => next(e))
 }
 
-/**
- * This mod's section of the Mods sidebar: where the conversation lives, each
- * part a row that copies on a click, then one that opens the folder.
- */
 async function whereabouts($: EngineInterface): Promise<{
   rows: SectionRow[]
   values: Map<string, { label: string; text: string }>
@@ -128,7 +122,7 @@ async function whereabouts($: EngineInterface): Promise<{
   for (const [key, icon, label, text] of parts) {
     if (text === null) continue
     values.set(key, { label, text })
-    rows.push({ id: key, icon, label, value: text, trailing: 'copy', confirms: true })
+    rows.push({ id: key, icon, label, value: text, trailing: 'copy', flashesCheck: true })
   }
   if (path !== null) {
     rows.push({ id: 'open', icon: 'folderOpen', label: 'Open the conversation folder', trailing: 'folderOpen' })
@@ -147,26 +141,26 @@ async function branchOf($: EngineInterface, root: string): Promise<string | null
   return name
 }
 
-/** Copies one part. The row's icon shows the check, so only a failure is worth a word. */
-async function copyValue($: EngineInterface, value: string, what: string, surface?: RenderSurface) {
+// The row's icon shows a check, so only a failed copy gets a toast.
+async function copyValue($: EngineInterface, value: string, what: string, surface: RenderSurface) {
   const copied = await $.ui.copy({ text: value, surface })
   if (!copied.isCopied) $.ui.toast(`${what} was not copied (${copied.reason})`)
 }
 
-async function copyTranscriptPath($: EngineInterface, surface?: RenderSurface) {
+async function copyTranscriptPath($: EngineInterface) {
   const path = await read($, transcriptPath)
   if (path === null) {
     $.ui.toast("The transcript's path is known from your next prompt")
     return
   }
-  const copied = await $.ui.copy({ text: path, surface })
+  const copied = await $.ui.copy({ text: path })
   $.ui.toast(copied.isCopied ? 'Transcript path copied' : `Nothing was copied (${copied.reason})`)
 }
 
 async function reveal($: EngineInterface, path: string) {
   try {
     if ((await $.env.get('OS')) === 'Windows_NT') {
-      // The path travels in the environment so no quoting can split it.
+      // Passed in the environment, so no quoting can break the path.
       await $.process.run(
         [
           'powershell.exe',
@@ -199,12 +193,9 @@ async function remember(
   await update($, transcriptPath, () => path)
 }
 
-/**
- * The transcript is `<config>/projects/<project folder>/<session id>.jsonl`.
- * The project folder's name is derived from the directory the session started
- * in, so look in the folders named after this session's directories first,
- * then in every project folder.
- */
+// A transcript is <config>/projects/<folder>/<session id>.jsonl, the folder
+// named after the directory the session started in. Try the folders named
+// after this session's directories first, then every folder.
 async function locateTranscript($: EngineInterface): Promise<string | null> {
   const home = (await $.env.get('USERPROFILE')) ?? (await $.env.get('HOME'))
   const config =
@@ -232,12 +223,8 @@ async function locateTranscript($: EngineInterface): Promise<string | null> {
   return null
 }
 
-function separatorOf(path: string): string {
-  return path.includes('\\') ? '\\' : '/'
-}
-
 function join(base: string, ...parts: string[]): string {
-  const sep = separatorOf(base)
+  const sep = base.includes('\\') ? '\\' : '/'
   return [base.replace(/[\\/]+$/, ''), ...parts].join(sep)
 }
 

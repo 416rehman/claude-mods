@@ -1,26 +1,19 @@
-// One mod's section of the Mods sidebar, drawn in a region of its own so a
-// whole row is a target and carries icons: a header that folds the section,
-// then its rows. A click or Enter posts to the mod that drew the region, which
-// acts on it; the region only draws and reports.
+// One mod's section, drawn in a Client region so a whole row is clickable and
+// can show icons. The region only draws and posts; the mod that drew it acts.
 
-import type { ClientModule, RenderElement, SvgProps } from 'claude-code'
+import type { ClientModule } from 'claude-code'
 
-import { iconSource } from './icons'
+import { regionIcon } from './icons'
 import type { IconName } from './icons'
 import { ROW_LINES } from './layout'
 
 export type SectionRow = {
-  /** The row's address within its section, what a post names. */
   id: string
   icon: IconName
   label: string
-  /** Drawn dim after the label, cut in the middle where it is long. */
   value?: string
-  /** The icon at the right edge; a click on it posts the row's `trailing` part. */
   trailing?: IconName
-  /** A copy: the trailing icon shows a check for a moment after a click. */
-  confirms?: true
-  /** Guidance, dim, and no target. */
+  flashesCheck?: true
   isHint?: true
 }
 
@@ -31,35 +24,22 @@ export type SectionProps = {
   rows: SectionRow[]
 }
 
-/** What the region posts: the header folds the section; a row acts. */
 export type SectionPost = { kind: 'toggle' } | { kind: 'row'; id: string; part: 'row' | 'trailing' }
 
 type SectionState = { hover: number | null; focus: number | null; flashed: string | null }
 
 const AT_REST: SectionState = { hover: null, focus: null, flashed: null }
 
-/**
- * A region's Svg is an image that reads no theme colour, so the icons are a
- * mid grey that holds 3:1 against a light and a dark background alike.
- */
-const INK = '#8a8a8a'
-
-/** A lit row: translucent, as the desktop paints a selection beneath the text. */
+// Translucent, because the desktop draws a text selection beneath the background.
 const LIT = 'rgba(128, 128, 128, 0.10)'
 
-/**
- * The desktop rounds a Box's corners only where it draws a border, so every
- * row has a round one: the lit row's in its tint, which rounds the tint; the
- * others' clear. No vertical padding, so the border takes no height.
- */
+// The desktop rounds a Box only when it has a border, so every row has one,
+// clear at rest. `paddingY: 0` stops the border adding height.
 const AT_REST_EDGE = 'rgba(0, 0, 0, 0)'
 
 const FLASH_MS = 1500
 
-/** Cells at a row's right edge where a click counts as on its trailing icon. */
 const TRAILING_CELLS = 5
-
-/** The icons' size, and the caret's beside the header's. */
 const ICON_PX = 16
 const CARET_PX = 14
 
@@ -77,7 +57,7 @@ const Section: ClientModule<SectionProps, SectionState> = (props, surface) => {
     const row = rowAt(line)
     if (row === undefined || row.isHint === true) return
     surface.post({ kind: 'row', id: row.id, part })
-    if (row.confirms === true) {
+    if (row.flashesCheck === true) {
       surface.setState({ ...now(), flashed: row.id })
       const stop = surface.every(FLASH_MS, () => {
         stop()
@@ -134,8 +114,8 @@ const Section: ClientModule<SectionProps, SectionState> = (props, surface) => {
         paddingX={1}
         {...tint(0)}
       >
-        {icon(props.isCollapsed ? 'caretRight' : 'caretDown', CARET_PX)}
-        {icon(props.icon, ICON_PX)}
+        {regionIcon(props.isCollapsed ? 'caretRight' : 'caretDown', CARET_PX)}
+        {regionIcon(props.icon, ICON_PX)}
         <Text weight="semibold">{props.title}</Text>
       </Box>
       {props.rows.slice(0, lines).map((row, i) => (
@@ -148,7 +128,7 @@ const Section: ClientModule<SectionProps, SectionState> = (props, surface) => {
           paddingX={1}
           {...tint(i + 1)}
         >
-          <Box flexShrink={0}>{icon(row.icon, ICON_PX)}</Box>
+          <Box flexShrink={0}>{regionIcon(row.icon, ICON_PX)}</Box>
           <Box flexShrink={0} marginRight={1}>
             <Text dimColor={row.isHint === true}>{row.label}</Text>
           </Box>
@@ -161,23 +141,13 @@ const Section: ClientModule<SectionProps, SectionState> = (props, surface) => {
           </Box>
           {row.trailing !== undefined && (
             <Box flexShrink={0} marginLeft={1}>
-              {icon(state.flashed === row.id ? 'check' : row.trailing, ICON_PX)}
+              {regionIcon(state.flashed === row.id ? 'check' : row.trailing, ICON_PX)}
             </Box>
           )}
         </Box>
       ))}
     </Box>
   )
-}
-
-/**
- * One of the app's own icons. A region's element table names no Svg, though
- * the desktop's region renderer draws one; an element is plain data, so it is
- * written out here.
- */
-function icon(name: IconName, size: number): RenderElement {
-  const props: SvgProps = { source: iconSource(name, INK), alt: name, width: size, height: size }
-  return { type: 'Svg', props } as RenderElement
 }
 
 export default Section

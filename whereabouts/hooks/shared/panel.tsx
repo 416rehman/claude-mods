@@ -1,8 +1,6 @@
-// The Mods sidebar every mod of claude-mods shares. Each mod carries this file;
-// none needs another installed. Where several are, they settle it in the render
-// chain: the lowest of them draws the footer's Mods button and the filter that
-// heads the panel, and each draws its own section after what the ones beneath
-// drew. Keep the copies in step with scripts/sync-shared.mjs.
+// The Mods sidebar. scripts/sync-shared.mjs copies this folder into every mod,
+// so edit it here, not in a copy. With several mods installed, the lowest in the
+// render chain draws the Mods button and the filter; each adds its own section.
 
 import type { ElementTable, EngineInterface, RenderElement, RenderNode } from 'claude-code'
 
@@ -13,48 +11,41 @@ import type { SectionPost, SectionProps, SectionRow } from './section'
 
 export type { SectionRow }
 
-/** The sidebar's pane id, the same in every mod so they draw into one pane. */
+/** The same in every mod, so they all draw into one pane. */
 export const PANE_ID = 'claude-mods'
 
 const OPEN_KEY = 'claude-mods-open'
 const FILTER_KEY = 'claude-mods-filter'
 
-/** The filter text, lower-cased: each mod hears it typed at `ui.input`. */
 let query = ''
-
-/** Whether this mod's section is folded, as the person left it this load. */
 let isFolded = false
 
 export type El = ElementTable<'desktop'>
 
-/** Whether `node` holds an element keyed `key`: a mod beneath drew it already. */
-function holds(node: unknown, key: string): boolean {
+function containsKey(node: unknown, key: string): boolean {
   if (typeof node !== 'object' || node === null) return false
   const props = (node as { props?: { key?: unknown } }).props
   if (props?.key === key) return true
   const children = (node as { children?: unknown }).children
-  return Array.isArray(children) && children.some(child => holds(child, key))
+  return Array.isArray(children) && children.some(child => containsKey(child, key))
 }
 
-/** Whether `node` is the engine's own drawing, which a pane of a plugin's has nothing in. */
-function isEngines(node: RenderElement): boolean {
+/** The engine draws nothing in a plugin's pane, so only a mod's drawing is kept. */
+function isEngineDrawing(node: RenderElement): boolean {
   return (node as { type?: unknown }).type === 'engine'
 }
 
-/** Whether any of `texts` holds the filter text; all do while it is empty. */
 export function matches(...texts: readonly string[]): boolean {
   return query === '' || texts.some(text => text.toLowerCase().includes(query))
 }
 
-/** Keeps what was typed in the filter and draws the sections again. */
-export function noteFilter($: EngineInterface, value: string): void {
+export function setFilter($: EngineInterface, value: string): void {
   query = value.trim().toLowerCase()
   $.ui.invalidate('ui.render')
 }
 
-/** The footer as the plugins beneath drew it, with one Mods button after it. */
 export function withModsButton($: EngineInterface, el: El, theirs: RenderElement): RenderElement {
-  if (holds(theirs, OPEN_KEY)) return theirs
+  if (containsKey(theirs, OPEN_KEY)) return theirs
   const { Box, Button } = el
   return (
     <Box flexDirection="row" alignItems="center" columnGap={1}>
@@ -72,13 +63,9 @@ async function togglePanel($: EngineInterface): Promise<void> {
   else await $.ui.open({ id: PANE_ID, title: 'Mods' })
 }
 
-/**
- * The panel as the mods beneath drew it, with this mod's section after it.
- * The lowest of them heads it with the filter.
- */
 export function withModsSection(el: El, theirs: RenderElement, section: RenderNode | null): RenderElement {
   const { Box, Input } = el
-  const isLowest = !holds(theirs, FILTER_KEY)
+  const isLowest = !containsKey(theirs, FILTER_KEY)
   return (
     <Box flexDirection="column" rowGap="lg" paddingY="sm">
       {isLowest && (
@@ -95,23 +82,17 @@ export function withModsSection(el: El, theirs: RenderElement, section: RenderNo
           </Box>
         </Box>
       )}
-      {!(isLowest && isEngines(theirs)) && theirs}
+      {!(isLowest && isEngineDrawing(theirs)) && theirs}
       {section}
     </Box>
   )
 }
 
-/** One of the app's own icons, in the colour of the text around it. */
 export function icon(el: El, name: IconName, size = 14): RenderElement {
   const { Svg } = el
   return <Svg source={iconSource(name)} alt={name} width={size} height={size} />
 }
 
-/**
- * A mod's section: a card holding the region that draws its header and rows,
- * folded as the person left it and open while the filter is in use. Null when
- * the filter leaves it no row.
- */
 export function sectionCard(
   el: El,
   heading: { plugin: string; icon: IconName; title: string },
@@ -135,7 +116,6 @@ export function sectionCard(
   )
 }
 
-/** What a section's region posted, or null for a message of another kind. */
 export function readSectionPost(data: unknown): SectionPost | null {
   if (typeof data !== 'object' || data === null || !('kind' in data)) return null
   if (data.kind === 'toggle') return { kind: 'toggle' }
@@ -145,7 +125,6 @@ export function readSectionPost(data: unknown): SectionPost | null {
   return { kind: 'row', id, part }
 }
 
-/** Folds this mod's section, or opens it. */
 export function toggleFold($: EngineInterface): void {
   isFolded = !isFolded
   $.ui.invalidate('ui.render')
