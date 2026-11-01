@@ -18,7 +18,7 @@
     {
       "name": "cleanup",
       "source": "./cleanup",
-      "description": "A /cleanup skill that keeps AI slop out of PRs: it removes redundant complexity, cuts comments to the few that carry a why in plain words, matches the codebase's comment conventions, and puts constants and types before the code that uses them. A commit hook runs it on everything Claude commits.",
+      "description": "A /cleanup skill that keeps AI slop out of PRs: it removes redundant complexity, gives names and comments plain words, fixes code instead of explaining it, cuts comments to the few that carry a why, matches the codebase's comment conventions, and puts constants and types before the code that uses them. A commit hook runs it on everything Claude commits.",
       "keywords": ["cleanup", "code cleanup", "simplify", "comments", "comment cleanup", "ai slop", "pull request", "code review", "commit hook"]
     }
   ]

@@ -1,16 +1,19 @@
 ---
 name: cleanup
-description: Clean up the code a branch adds before it becomes a PR, to keep AI slop out of it - redundant complexity, narration and change-log comments, jargon and slop words (sentinel, guard, em dashes), comments standing in for unclear code, and declarations left wherever they happened to be typed. No comment beats a comment - the few that stay carry a why in plain, short words. Follows the codebase's own conventions (where its struct fields are documented, a new field is too), and puts constants and statics at the top and types before the code that uses them. Use when the user asks to clean up, tidy, de-slop, simplify, or prep code for a PR or commit, mentions too many or verbose comments or a comment pass, asks to organize a file's declarations, or runs /cleanup; and whenever the cleanup commit gate blocks a git commit.
+description: Clean up the code a branch adds before it becomes a PR, to keep AI slop out of it - redundant complexity (near-copies, derivable state, deep nesting, wasted work, parameters wider than what a function reads, helpers the codebase already has), vague or jargon names, narration and change-log comments, slop words (sentinel, guard, em dashes), comments standing in for unclear code, and declarations left wherever they happened to be typed. No comment beats a comment - code that needs one to be read is fixed instead, and the few that stay carry a why in plain, short words. Follows the codebase's own conventions (where its struct fields are documented, a new field is too), applies the CLAUDE.md rules that govern the code, and puts constants and statics at the top and types before the code that uses them. Use when the user asks to clean up, tidy, de-slop, simplify, or prep code for a PR or commit, mentions too many or verbose comments or a comment pass, asks to organize a file's declarations, or runs /cleanup; and whenever the cleanup commit gate blocks a git commit.
 ---
 
 # Cleanup
 
-An editing pass over the code a branch adds, so the PR carries no slop. Three
-passes - simplicity, placement, comments - each led by how the codebase
-already does things. The standard behind all three: a good codebase is
+An editing pass over the code a branch adds, so the PR carries no slop. Four
+passes - simplicity, placement, names, comments - each led by how the codebase
+already does things. The standard behind all four: a good codebase is
 readable code, not commented code. **No comment beats a comment.** Make the
-code say it; comment only what code cannot say, in words a new teammate
-understands on first read.
+code say it; comment only what code cannot say. Names and comments are held
+to the same plain words.
+
+Quality only, never behavior: a bug noticed on the way is reported, not fixed
+here, because fixing it changes what the code does. `/code-review` hunts bugs.
 
 ## Target - which code the pass covers
 
@@ -47,6 +50,17 @@ language, same layer). Note:
 - **Placement:** where constants, statics, and module-level config sit; the
   order of types, functions, and methods; whether helpers come before or after
   their callers; exported before private or interleaved.
+- **Names:** casing, prefixes (`is`/`has` for booleans), how functions are
+  worded, and the words the codebase already uses for its things.
+- **Helpers:** the shared and utility modules, and the files beside the
+  change, so new code calls what exists instead of writing it again.
+- **Written rules:** every CLAUDE.md that governs the target: the user's
+  `~/.claude/CLAUDE.md`, the repo root's, and any in a directory above a
+  changed file (each covers only files at or below it), plus AGENTS.md or
+  CONTRIBUTING where the repo has them. A line in the target that breaks one
+  of their rules is fixed like any other finding, within the limits below, and
+  the report quotes the rule. Only a rule you can quote, broken by a line you
+  can point to; not the spirit of a document.
 - **Comments:** which kinds of declaration carry them (struct or class fields,
   enum members, exported functions and types, config keys, test cases), and in
   what form (`///`, `/** */`, `#`, leading or trailing), length, and tone.
@@ -55,6 +69,35 @@ language, same layer). Note:
 The codebase's convention wins wherever it differs from the defaults below.
 The defaults apply only where the codebase shows no pattern. A convention is a
 pattern across several instances, not one file's accident.
+
+## Plain words - for names and comments
+
+Every name and every comment the target adds is read by someone who wasn't
+there when it was written. Both pass the same tests:
+
+- **Plain words.** No jargon a new teammate wouldn't know, no shorthand coined
+  while writing the code, no abbreviation the codebase doesn't already use.
+  Call a thing what the codebase already calls it.
+- **Understood on first read**, from the file alone: no term defined only in a
+  PR or a conversation, no "new", "old", "v2" or "temp" that meant something
+  only on the day it was written.
+- **Short, not cryptic.** As few words as stay clear: one line for a comment,
+  no filler in a name (`theUserList` is `users`), and no single letters outside
+  a short loop or lambda (`c`, `d`, `tmp2`).
+- **No slop words.** Words that mark text as machine-written, not because
+  they're wrong but because no one says them in a code review: *sentinel*,
+  *guard* (for a plain check), *robust*, *seamless*, *leverage*, *utilize*,
+  *ensure*, *crucial*, *comprehensive*, *essentially*, *delve*, *footgun*,
+  *load-bearing*, *canonical*, *hydrate* (for a plain load). Say the plain
+  thing, in names too: `NULL_SENTINEL` is `NO_VALUE`, `guardInput` is
+  `checkInput`, `ensureDir` is `makeDir`. In comments, no em dashes (—) or en
+  dashes (–): a colon, a comma, or a second sentence. The exception is a name
+  the code or language already uses: a `Guard` type, Swift's `guard`.
+
+```ts
+// Bad:  Hydrate the memoized selector snapshot to avoid the re-entrancy footgun
+// Good: Read the store once per render; reading it inside the loop re-renders forever
+```
 
 ## Pass 1 - simplicity
 
@@ -69,14 +112,34 @@ and harder than what it does. In the target, remove:
 - **Impossible checks:** checks for states the types or callers already rule
   out (a null check on a non-nullable value, a `try` around code that can't
   throw, a second type check of a value already narrowed).
-- **Duplication:** the same logic written twice in the target - keep one,
-  reuse it. Prefer the codebase's existing helper over a new copy.
+- **Parameters wider than the need:** a function that takes a whole object,
+  or a type built only to fit its signature, and reads one field of it. When a
+  caller assembles a throwaway object, struct, tuple or options bag just to
+  make a call, the signature is what's wrong: change the function to take what
+  it reads, and update every caller.
+- **Duplication:** the same logic written twice, or near-copies that differ
+  by a value or two - keep one, with the difference as a parameter. Code that
+  rewrites a helper the codebase already has calls that helper instead.
+- **Derivable state:** a stored value that can be computed from others it must
+  stay in step with (a count kept beside its list, a flag mirroring a field).
+  Compute it where it is read.
+- **Deep nesting:** a pyramid of `if`s that early returns or `continue` flatten.
+- **Wasted work:** the same value computed twice, the same file, query or
+  request made twice, independent reads awaited one after another. Fix it when
+  the fix plainly keeps behavior (a pure read hoisted, or run together); flag
+  the rest, such as blocking work added to startup or a hot path, or a
+  long-lived closure that keeps a large scope alive.
 - **Overbuilt code:** generality nothing uses yet, a hand-rolled version of
   what the language, standard library, or codebase already provides.
 
 The question for each line: would a reviewer ask "why is this here?" If the
 honest answer is "no reason", it goes. Within the limits below - behavior is
 unchanged and verified; anything bigger is flagged, not done.
+
+**The fix at the right depth.** A special case added to shared code so one
+caller works, or a symptom patched downstream of its cause, means the fix sits
+too shallow. Redesigning the mechanism is beyond this pass: flag it, naming the
+more general change that would make the special case unnecessary.
 
 ## Pass 2 - placement
 
@@ -108,7 +171,24 @@ Placement is behavior-preserving or it does not happen:
 - Verify every move: build and run the relevant tests. If you can't verify it,
   don't move it - flag it.
 
-## Pass 3 - comments
+## Pass 3 - names
+
+Every name the target adds - variable, parameter, function, type, constant,
+file - passes the plain-words tests and says what the thing is or does:
+
+- A function is named for what it does (`copyPath`, `parseHeader`), a boolean
+  for the question it answers (`isOpen`, `hasRows`), a value for what it holds,
+  with its unit when it has one (`retryDelayMs`).
+- A name that needs a comment to be understood is the wrong name: rename it
+  and drop the comment.
+- No words that fit anything: `data`, `info`, `item`, `obj`, `result`,
+  `handle`, `process`, `manager`, `helper`, `util` - except as a short local
+  the next line makes plain.
+
+The codebase's own naming conventions win over these defaults. Renames stay
+within the limits below: nothing reachable from outside the visible code.
+
+## Pass 4 - comments
 
 ### The core principle
 
@@ -116,8 +196,9 @@ No comment beats a comment. Code already shows **how**; a comment earns its
 place only by carrying **why** - context the code cannot: a non-obvious
 constraint, a deliberate deviation, a gotcha, a workaround, the reason a
 tempting simpler version is wrong. Default to deleting. When in doubt about a
-*how* comment, delete it - unless the code can't be understood without it, in
-which case make the code clear (rule 5). When in doubt about a *why* comment
+*how* comment, delete it. If deleting it would leave the code harder to read,
+the code is what needs fixing: fix it (rule 5), then delete the comment. A
+comment is never the fix for unclear code. When in doubt about a *why* comment
 that warns against breaking something, keep it: wrongly deleting a warning
 that does real work costs more than one mediocre comment.
 
@@ -216,11 +297,12 @@ sometimes zero: delete. A five-line block almost never survives intact.
 because the code doesn't say it: a cryptic name (`# d is the delay in ms`), a
 magic value (`# 86400 = one day`), a dense condition (`# trial that has
 ended`), or a block that does one nameable thing (`# normalize the DN`).
--> **Make the code say it, then delete the comment**: rename, name the
-constant (placed per Pass 2), extract the named boolean, or extract the helper
-whose name is the comment, within the limits below. If the fix is out of
-scope, keep the comment and flag it. Names can't carry a *why*: a comment
-explaining *why* is never resolved by renaming; keep it (rule 7).
+-> **Make the code say it, then delete the comment**: rename (Pass 3), name
+the constant (placed per Pass 2), extract the named boolean, or extract the
+helper whose name is the comment. Keeping the comment is the last resort, only
+when the fix would reach outside the visible code (a public name, a wire
+field); then flag it. Names can't carry a *why*: a comment explaining *why* is
+never resolved by renaming; keep it (rule 7).
 
 **6. Is it stale?** Describes code that no longer exists or behavior that has
 changed. -> **Delete** (or correct it, if the point still holds). A wrong
@@ -247,30 +329,10 @@ them where the codebase uses them; don't add them where it doesn't.
 
 ### Wording - every comment that survives
 
-A kept or added comment must pass all five, or be rewritten until it does:
-
-- **Plain words.** No jargon a new teammate wouldn't know, no shorthand coined
-  while writing the code, no abbreviation the codebase doesn't already use.
-  Name things as the code names them.
-- **Understood on first read**, from the file alone: no "as discussed", no
-  "the new approach", no term defined only in a PR or a conversation.
-- **Short.** One line where one line holds the fact. Cut "Note that",
-  "basically", "this is needed because", "we" and "here".
-- **Says why, not how.** If the rewrite comes out as a description of the
-  code, the comment was narration: delete it.
-- **No slop words.** Words that mark text as machine-written, not because
-  they're wrong but because no one says them in a code review: *sentinel*,
-  *guard* (for a plain check), *robust*, *seamless*, *leverage*, *utilize*,
-  *ensure*, *crucial*, *comprehensive*, *essentially*, *delve*, *footgun*,
-  *load-bearing*, *canonical*. Say the plain thing: "the value that means
-  empty", "check", "use", "make sure". No em dashes (—) or en dashes (–): a
-  colon, a comma, or a second sentence. The exception is a name the code
-  itself uses: a `Guard` type or Swift's `guard` is named as it is.
-
-```ts
-// Bad:  Hydrate the memoized selector snapshot to avoid the re-entrancy footgun
-// Good: Read the store once per render; reading it inside the loop re-renders forever
-```
+A kept or added comment passes the plain-words tests, or is rewritten until it
+does. Cut "Note that", "basically", "this is needed because", "we" and
+"here". And it says why, not how: if the rewrite comes out as a description
+of the code, the comment was narration; delete it.
 
 ### TODOs
 
@@ -292,11 +354,11 @@ API surface is legitimate even when short.
 
 ## Limits on code changes
 
-The pass changes code in three ways only, each behavior-preserving: the
-removals of Pass 1, the moves of Pass 2, and these fixes for what a deleted
-*what* comment was compensating for (rule 5):
+The pass changes code only in these ways, each behavior-preserving: the
+simplifications of Pass 1, the moves of Pass 2, and:
 
 - rename a local variable, parameter, or unexported/private identifier
+- narrow a private function's parameters to what it reads, updating every caller
 - name a magic value as a constant
 - extract a compound condition into a named boolean
 - extract a small block that does one nameable thing into a helper named after it
@@ -345,15 +407,17 @@ running the pass: the sign-off is the pass's signature, not a bypass.
 
 After editing, report:
 
-1. **Counts** - per file: simplifications; declarations moved; comments
-   deleted / rewritten / kept / added (added only where the codebase's
-   convention called for one).
-2. **Code changes** - each simplification, each move, and each readability
-   change (rename, constant, named boolean, helper), one line each, and how
-   it was verified.
+1. **Counts** - per file: simplifications; rule fixes (CLAUDE.md, quoted);
+   declarations moved; renames;
+   comments deleted / rewritten / kept / added (added only where the
+   codebase's convention called for one).
+2. **Code changes** - each simplification, move, rename, and readability
+   change (constant, named boolean, helper), one line each, and how it was
+   verified.
 3. **Flags** - what the pass could not fix within scope: complexity that needs
-   a real refactor or reaches outside the visible code; moves blocked by
-   order-sensitive semantics; comments compensating for unclear code that
+   a real refactor or reaches outside the visible code; fixes at the wrong
+   depth, with the general change; wasted work that couldn't be fixed safely;
+   bugs noticed; moves blocked by order-sensitive semantics; comments compensating for unclear code that
    couldn't be fixed (public names, couldn't verify); deferral TODOs; comments
    whose correctness couldn't be verified.
 4. **Judgment calls** - borderline keep/delete or convention decisions, one
@@ -376,6 +440,22 @@ const label = displayName(user)
 
 // After: `user` is a non-optional User, and the wrapper added nothing
 const label = formatName(user)
+```
+
+**Simplicity - a caller built a whole Request so the check could read one field:**
+
+```ts
+// Before
+function hasAuth(req: Request): boolean {
+  return req.headers.has('authorization')
+}
+if (hasAuth(new Request(url, { headers }))) { ... }
+
+// After: the function takes what it reads
+function hasAuth(headers: Headers): boolean {
+  return headers.has('authorization')
+}
+if (hasAuth(headers)) { ... }
 ```
 
 **Placement - a constant and a type the branch added mid-file:**

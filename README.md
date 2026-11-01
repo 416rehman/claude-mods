@@ -29,11 +29,12 @@ The Whereabouts section of the Mods sidebar shows where the conversation lives, 
 
 A skill, `/cleanup`, with no UI. It goes over the code the current branch adds over its base, and only that code, so a PR carries no slop:
 
-- **Simplicity.** Dead code, wrappers that only forward, checks for states that can't happen, duplicated logic and generality nothing uses come out.
+- **Simplicity.** Dead code, wrappers that only forward, checks for states that can't happen, near-copies, state that could be computed, deep nesting, repeated work and generality nothing uses come out. A function that takes a whole object to read one field takes that field instead, so callers stop building throwaway objects to call it. New code calls the helpers the codebase already has.
 - **Placement.** Constants and statics at the top, types before the functions and methods that use them, new members beside their kind.
-- **Comments.** No comment beats a comment. Narration, change-log notes and pointers to moving targets go; a comment that explains *what* becomes clearer code instead; a comment that carries a *why* stays, cut to one plain line with no jargon, no em dashes and no slop words like *sentinel* or *guard*. Comment conventions come from the codebase: where its struct fields are documented, a new field is too, and where they aren't, no comment is added.
+- **Names.** Variables, functions and types pass the same plain-words test as comments: no jargon, no slop words, no single letters, no `data` or `manager` that could mean anything.
+- **Comments.** No comment beats a comment. Narration, change-log notes and pointers to moving targets go. Where removing a comment would leave the code harder to read, the code is fixed instead. A comment that carries a *why* stays, cut to one plain line with no jargon, no em dashes and no slop words like *sentinel* or *guard*. Comment conventions come from the codebase: where its struct fields are documented, a new field is too, and where they aren't, no comment is added.
 
-Every code change keeps behaviour as it was and is checked by the build and tests; anything bigger is flagged, not done.
+The rules in your CLAUDE.md files apply too. Every code change keeps behaviour as it was and is checked by the build and tests; anything bigger, a special case that belongs in a deeper fix, or a bug noticed on the way is flagged, not done.
 
 A commit hook runs it for you: every `git commit` Claude makes that adds source lines is held until the pass has covered exactly what is being committed. `/cleanup <branch>` targets a PR into another branch; `/cleanup <file>` covers a whole file.
 

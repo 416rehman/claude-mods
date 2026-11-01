@@ -1,6 +1,6 @@
 {
   "name": "cleanup",
   "version": "0.1.0",
-  "description": "Keeps AI slop out of PRs: redundant complexity removed, comments cut to the few that carry a why in plain words and matched to the codebase's conventions, constants and types placed before the code that uses them, and a gate that holds a commit until the pass has run.",
+  "description": "Keeps AI slop out of PRs: redundant complexity removed, names and comments in plain words, unclear code fixed rather than explained, comments cut to the few that carry a why and matched to the codebase's conventions, constants and types placed before the code that uses them, and a gate that holds a commit until the pass has run.",
   "keywords": ["cleanup", "code cleanup", "simplify", "comments", "comment cleanup", "ai slop", "code organization", "commit", "review"]
 }
