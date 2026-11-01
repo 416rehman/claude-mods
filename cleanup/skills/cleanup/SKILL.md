@@ -1,14 +1,16 @@
 ---
 name: cleanup
-description: Clean up the code a branch adds before it becomes a PR, to keep AI slop out of it - narration and change-log comments, comments standing in for unclear code, and declarations left wherever they happened to be typed. Keeps the comments that carry a why, follows the codebase's own conventions (where its struct fields are documented, a new field is too), and puts constants and statics at the top and types before the code that uses them. Use when the user asks to clean up, tidy, de-slop, or prep code for a PR or commit, mentions too many or verbose comments or a comment pass, asks to organize a file's declarations, or runs /cleanup; and whenever the cleanup commit gate blocks a git commit.
+description: Clean up the code a branch adds before it becomes a PR, to keep AI slop out of it - redundant complexity, narration and change-log comments, jargon and slop words (sentinel, guard, em dashes), comments standing in for unclear code, and declarations left wherever they happened to be typed. No comment beats a comment - the few that stay carry a why in plain, short words. Follows the codebase's own conventions (where its struct fields are documented, a new field is too), and puts constants and statics at the top and types before the code that uses them. Use when the user asks to clean up, tidy, de-slop, simplify, or prep code for a PR or commit, mentions too many or verbose comments or a comment pass, asks to organize a file's declarations, or runs /cleanup; and whenever the cleanup commit gate blocks a git commit.
 ---
 
 # Cleanup
 
-An editing pass over the code a branch adds, so the PR carries no slop. Two
-passes, placement then comments, both led by how the codebase already does
-things. The standard behind both: a good codebase is readable code, not
-commented code. Make the code say it; comment only what code cannot say.
+An editing pass over the code a branch adds, so the PR carries no slop. Three
+passes - simplicity, placement, comments - each led by how the codebase
+already does things. The standard behind all three: a good codebase is
+readable code, not commented code. **No comment beats a comment.** Make the
+code say it; comment only what code cannot say, in words a new teammate
+understands on first read.
 
 ## Target - which code the pass covers
 
@@ -54,7 +56,29 @@ The codebase's convention wins wherever it differs from the defaults below.
 The defaults apply only where the codebase shows no pattern. A convention is a
 pattern across several instances, not one file's accident.
 
-## Pass 1 - placement
+## Pass 1 - simplicity
+
+Redundant complexity is the slop a comment pass can't fix: the code is longer
+and harder than what it does. In the target, remove:
+
+- **Dead code:** unused variables, parameters, imports, branches that can't
+  run, functions nothing calls, commented-out code.
+- **Needless indirection:** a wrapper that only forwards, a helper called once
+  that reads worse than its body inlined, a one-implementation interface, an
+  option or config nothing sets.
+- **Impossible checks:** checks for states the types or callers already rule
+  out (a null check on a non-nullable value, a `try` around code that can't
+  throw, a second type check of a value already narrowed).
+- **Duplication:** the same logic written twice in the target - keep one,
+  reuse it. Prefer the codebase's existing helper over a new copy.
+- **Overbuilt code:** generality nothing uses yet, a hand-rolled version of
+  what the language, standard library, or codebase already provides.
+
+The question for each line: would a reviewer ask "why is this here?" If the
+honest answer is "no reason", it goes. Within the limits below - behavior is
+unchanged and verified; anything bigger is flagged, not done.
+
+## Pass 2 - placement
 
 For every declaration the target adds, or moves:
 
@@ -84,17 +108,18 @@ Placement is behavior-preserving or it does not happen:
 - Verify every move: build and run the relevant tests. If you can't verify it,
   don't move it - flag it.
 
-## Pass 2 - comments
+## Pass 3 - comments
 
 ### The core principle
 
-Code already shows **how**. A comment earns its place only by carrying **why**
-- context the code cannot: a non-obvious constraint, a deliberate deviation, a
-gotcha, a workaround, the reason a tempting simpler version is wrong. When in
-doubt about a *why* comment, keep it; when in doubt about a *how* comment,
-delete it - unless the code can't be understood without it, in which case make
-the code clear (rule 5). Wrongly deleting a warning that does real work costs
-far more than leaving one mediocre comment behind.
+No comment beats a comment. Code already shows **how**; a comment earns its
+place only by carrying **why** - context the code cannot: a non-obvious
+constraint, a deliberate deviation, a gotcha, a workaround, the reason a
+tempting simpler version is wrong. Default to deleting. When in doubt about a
+*how* comment, delete it - unless the code can't be understood without it, in
+which case make the code clear (rule 5). When in doubt about a *why* comment
+that warns against breaking something, keep it: wrongly deleting a warning
+that does real work costs more than one mediocre comment.
 
 ### Match the codebase's comment conventions
 
@@ -192,7 +217,7 @@ because the code doesn't say it: a cryptic name (`# d is the delay in ms`), a
 magic value (`# 86400 = one day`), a dense condition (`# trial that has
 ended`), or a block that does one nameable thing (`# normalize the DN`).
 -> **Make the code say it, then delete the comment**: rename, name the
-constant (placed per Pass 1), extract the named boolean, or extract the helper
+constant (placed per Pass 2), extract the named boolean, or extract the helper
 whose name is the comment, within the limits below. If the fix is out of
 scope, keep the comment and flag it. Names can't carry a *why*: a comment
 explaining *why* is never resolved by renaming; keep it (rule 7).
@@ -220,6 +245,33 @@ Three keep categories easy to misread as deletable:
 **Section banners** (`# --- Name ---`) are navigation, not narration. Keep
 them where the codebase uses them; don't add them where it doesn't.
 
+### Wording - every comment that survives
+
+A kept or added comment must pass all five, or be rewritten until it does:
+
+- **Plain words.** No jargon a new teammate wouldn't know, no shorthand coined
+  while writing the code, no abbreviation the codebase doesn't already use.
+  Name things as the code names them.
+- **Understood on first read**, from the file alone: no "as discussed", no
+  "the new approach", no term defined only in a PR or a conversation.
+- **Short.** One line where one line holds the fact. Cut "Note that",
+  "basically", "this is needed because", "we" and "here".
+- **Says why, not how.** If the rewrite comes out as a description of the
+  code, the comment was narration: delete it.
+- **No slop words.** Words that mark text as machine-written, not because
+  they're wrong but because no one says them in a code review: *sentinel*,
+  *guard* (for a plain check), *robust*, *seamless*, *leverage*, *utilize*,
+  *ensure*, *crucial*, *comprehensive*, *essentially*, *delve*, *footgun*,
+  *load-bearing*, *canonical*. Say the plain thing: "the value that means
+  empty", "check", "use", "make sure". No em dashes (—) or en dashes (–): a
+  colon, a comma, or a second sentence. The exception is a name the code
+  itself uses: a `Guard` type or Swift's `guard` is named as it is.
+
+```ts
+// Bad:  Hydrate the memoized selector snapshot to avoid the re-entrancy footgun
+// Good: Read the store once per render; reading it inside the loop re-renders forever
+```
+
 ### TODOs
 
 Keep TODO/FIXME comments; they need no issue IDs. Two exceptions: a TODO for
@@ -240,9 +292,9 @@ API surface is legitimate even when short.
 
 ## Limits on code changes
 
-Most of the pass moves declarations and edits comments. Beyond placement, the
-only code changes allowed are the ones a deleted *what* comment was
-compensating for (rule 5), all behavior-preserving:
+The pass changes code in three ways only, each behavior-preserving: the
+removals of Pass 1, the moves of Pass 2, and these fixes for what a deleted
+*what* comment was compensating for (rule 5):
 
 - rename a local variable, parameter, or unexported/private identifier
 - name a magic value as a constant
@@ -251,12 +303,14 @@ compensating for (rule 5), all behavior-preserving:
 
 And:
 
-- No logic changes, no reordering of side effects, no new dependencies.
-- Don't rename anything referenced by name outside the code you can see and
-  verify: exported/public API, serialized or wire field names, config keys, DB
-  columns, names used via reflection, templates, other repos. Keep the comment
-  and flag it instead.
-- If the code can't be made self-explanatory this way, keep the comment and
+- No change to what the code does, no reordering of side effects, no new
+  dependencies. Removing a check is allowed only when the types or every
+  caller in view prove it can't fire.
+- Don't rename or remove anything reachable from outside the code you can see
+  and verify: exported/public API, serialized or wire field names, config keys,
+  DB columns, names used via reflection, templates, other repos. Keep it and
+  flag it instead.
+- If the code can't be made simple or self-explanatory this way, leave it and
   flag it as a refactor candidate. Real refactors are a separate task.
 - Verify every code change: build and run the relevant tests. If you can't,
   don't make it - flag it.
@@ -290,14 +344,17 @@ sign-off is the pass's signature, not a bypass.
 
 After editing, report:
 
-1. **Counts** - per file: declarations moved; comments deleted / rewritten /
-   kept / added (added only where the codebase's convention called for one).
-2. **Code changes** - each readability change (rename, constant, named
-   boolean, helper) and each move, one line each, and how it was verified.
-3. **Flags** - what the pass could not fix within scope: moves blocked by
+1. **Counts** - per file: simplifications; declarations moved; comments
+   deleted / rewritten / kept / added (added only where the codebase's
+   convention called for one).
+2. **Code changes** - each simplification, each move, and each readability
+   change (rename, constant, named boolean, helper), one line each, and how
+   it was verified.
+3. **Flags** - what the pass could not fix within scope: complexity that needs
+   a real refactor or reaches outside the visible code; moves blocked by
    order-sensitive semantics; comments compensating for unclear code that
-   couldn't be fixed (public names, needs a real refactor, couldn't verify);
-   deferral TODOs; comments whose correctness couldn't be verified.
+   couldn't be fixed (public names, couldn't verify); deferral TODOs; comments
+   whose correctness couldn't be verified.
 4. **Judgment calls** - borderline keep/delete or convention decisions, one
    line each, so the user can overrule.
 
@@ -305,6 +362,20 @@ Keep the report brief. Do not list every deleted narration comment - they are
 the point of the pass, not news.
 
 ## Worked examples
+
+**Simplicity - a wrapper that only forwarded, checking a state that can't happen:**
+
+```ts
+// Before
+function displayName(user: User): string {
+  if (!user) return ''
+  return formatName(user)
+}
+const label = displayName(user)
+
+// After: `user` is a non-optional User, and the wrapper added nothing
+const label = formatName(user)
+```
 
 **Placement - a constant and a type the branch added mid-file:**
 
@@ -392,6 +463,6 @@ rounded = round_half_up(amount_pence)
 ```python
 # JSONTokener.nextValue() may return a value that equals() null -
 # both checks are required, do not simplify
-if value is None or value == NULL_SENTINEL:
+if value is None or value == JSON_NULL:
     return None
 ```
