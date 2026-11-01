@@ -1,6 +1,0 @@
-{
-  "name": "copy-kit",
-  "version": "0.1.0",
-  "description": "Copy any section of a reply, or check several and copy them together, and copy the path of the conversation's transcript.",
-  "types": "./types/index.d.ts"
-}

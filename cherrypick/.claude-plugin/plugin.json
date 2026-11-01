@@ -1,0 +1,7 @@
+{
+  "name": "cherrypick",
+  "version": "0.1.0",
+  "description": "Copy any part of a Claude reply: copy one paragraph, quote, code block or heading without its markdown markers, or check several sections and copy them together.",
+  "keywords": ["copy", "copy code", "copy quote", "copy section", "copy message", "clipboard", "markdown", "select"],
+  "types": "./types/index.d.ts"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "cleanup",
+  "version": "0.1.0",
+  "description": "Code cleanup before a commit: comments trimmed to the ones that carry a why and matched to the codebase's own conventions, constants and types placed before the code that uses them, and a gate that holds a commit until the pass has run.",
+  "keywords": ["cleanup", "code cleanup", "comments", "comment cleanup", "refactor", "code organization", "commit", "review"]
+}

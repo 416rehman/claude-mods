@@ -2,7 +2,7 @@ import { describe, expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 const REPLY = {
-  plugin: 'copy-kit',
+  plugin: 'cherrypick',
   component: 'AssistantMessage',
   requestId: 'reply-a',
   props: {
@@ -23,14 +23,23 @@ const CODE_REPLY = {
   props: { text: 'Run:\n\n```sh\nnpm test\n```', isFirstOfReply: true },
 } as const
 
-const FOOTER = {
-  plugin: 'copy-kit',
-  component: 'SessionMode',
-  props: { modes: ['focus'] },
+
+const PANE = {
+  plugin: 'cherrypick',
+  component: 'Pane',
+  requestId: 'claude-mods',
+  props: {
+    title: 'Mods',
+    isFocused: false,
+    bodyColumns: 60,
+    placement: 'dock',
+    scroll: { offset: 0, bodyRows: 40 },
+    view: {},
+  },
 } as const
 
 const BAR = {
-  plugin: 'copy-kit',
+  plugin: 'cherrypick',
   component: 'AbovePrompt',
   props: {
     hasSurvey: false,
@@ -68,7 +77,6 @@ function parentOfKey(node: unknown, key: string): Drawn | undefined {
   return undefined
 }
 
-const PATH = 'C:\\Users\\me\\.claude\\projects\\D--work-app\\0f3c.jsonl'
 
 describe('selecting sections of replies', () => {
   for (const surface of ['desktop', 'vscode'] as const) {
@@ -484,126 +492,72 @@ describe('selecting sections of replies', () => {
   })
 })
 
-describe('copying the transcript path', () => {
-  test('the footer keeps what other plugins drew there, first, and adds Transcript', async ($, on) => {
+describe('the Cherrypick section of the Mods sidebar', () => {
+  const CARD = 'claude-mods-cherrypick'
+  type Region = {
+    findAll: (q: { type: string; in?: string }) => Promise<{ text: string; props: Record<string, unknown> }[]>
+  }
+  const cardTexts = async (pane: Region) =>
+    (await pane.findAll({ type: 'Text', in: CARD })).map(text => text.text)
+
+  test('with nothing checked, it says how to collect sections', async ($, on) => {
+    on('ui.render', ($, e) => {
+      const { Box } = $.ui.resolve(e)
+      return <Box />
+    })
+
+    const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+    expect(await cardTexts(pane)).toEqual(['Cherrypick', 'Tick ☐ on a part of a reply to collect it.'])
+    await pane.unmount()
+  })
+
+  test('lists the checked sections in reply order; a click removes one, the last rows copy or clear', async ($, on) => {
     const copied: string[] = []
-    const toasts: string[] = []
-    const launched: string[] = []
     on('ui.copy', (_, e) => {
       copied.push(e.text)
       return { value: { isCopied: true } }
     })
-    on('ui.toast', (_, e) => {
-      toasts.push(e.text)
-      return { value: undefined }
-    })
-    // Beneath this mod: another plugin's launcher beside the mode labels, as a
-    // game's launcher draws this site.
+    on('ui.toast', () => ({ value: undefined }))
     on('ui.render', ($, e) => {
-      const { Box, Button, Text } = $.ui.resolve(e)
-      return (
-        <Box flexDirection="row">
-          <Button key="launcher" label="Spinlings" plain onPress={() => launched.push('open')} />
-          <Text>focus</Text>
-        </Box>
-      )
+      const { Box, Text } = $.ui.resolve(e)
+      return e.component === 'AssistantMessage' ? <Text>engine</Text> : <Box />
     })
-    on('classic.UserPromptSubmit', () => ({})) // no settings hook beneath
 
-    await $.classic.UserPromptSubmit({ prompt: 'hi', transcript_path: PATH })
-    const footer = await $.ui.mount({ ...FOOTER, surface: 'desktop' })
+    const reply = await $.ui.mount({ ...REPLY, surface: 'desktop' })
+    await reply.press({ key: 'pick-2' })
+    await reply.press({ key: 'pick-1' })
+    await reply.press({ key: 'pick-0' })
 
-    const labels = (await footer.findAll({ type: 'Button' })).map(button => button.props.label)
-    expect(labels).toEqual(['Spinlings', 'Transcript'])
-    expect((await footer.find({ type: 'Text' }))?.text).toBe('focus')
-
-    await footer.press({ key: 'copy-transcript' })
-    expect(copied).toEqual([PATH])
-    expect(toasts).toEqual(['Transcript path copied'])
-    expect(launched).toEqual([])
-    await footer.unmount()
-
-    const terminal = await $.ui.mount({ ...FOOTER, surface: 'terminal' })
-    expect((await terminal.findAll({ type: 'Button' })).map(button => button.props.label)).toEqual([
-      'Spinlings',
+    const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+    await pane.resize({ columns: 50, rows: 10, in: CARD })
+    expect(await cardTexts(pane)).toEqual([
+      'Cherrypick',
+      'Text',
+      'He said:',
+      'Quote',
+      'keep it simple',
+      'Text',
+      'So I did.',
+      'Copy 3 sections',
+      'Clear checks',
     ])
-    await terminal.unmount()
-  })
 
-  test('/transcript copies the path and puts nothing in the conversation', async ($, on) => {
-    const copied: string[] = []
-    const opened: string[] = []
-    on('ui.copy', (_, e) => {
-      copied.push(e.text)
-      return { value: { isCopied: true } }
-    })
-    on('ui.toast', () => ({ value: undefined }))
-    on('ui.open', (_, e) => {
-      opened.push(e.id)
-      return { value: { isPlaced: true } }
-    })
-    on('classic.UserPromptSubmit', () => ({})) // no settings hook beneath
+    // Lines 2-3, the first checked section: a click removes it.
+    await pane.pointer({ type: 'down', x: 4, y: 2, button: 'left', in: CARD })
+    expect(await cardTexts(pane)).toContain('Copy 2 sections')
+    expect((await reply.find({ key: 'pick-0' }))?.props.label).toBe('☐')
 
-    await $.classic.UserPromptSubmit({ prompt: 'hi', transcript_path: PATH })
-    const result = await $.command.run({
-      command: 'transcript',
-      args: '',
-      origin: { kind: 'composer' },
-      presentation: { isFullscreen: false, columns: 120 },
-    })
+    // Lines 6-7 now copy them, which clears them.
+    await pane.pointer({ type: 'down', x: 4, y: 6, button: 'left', in: CARD })
+    expect(copied).toEqual(['> keep it simple\n\nSo I did.'])
+    expect(await cardTexts(pane)).toContain('Tick ☐ on a part of a reply to collect it.')
 
-    expect(result).toEqual({})
-    expect(copied).toEqual([PATH])
-    expect(opened).toEqual([])
-  })
-
-  test("a subagent's prompt does not replace the conversation's path", async ($, on) => {
-    const copied: string[] = []
-    on('ui.copy', (_, e) => {
-      copied.push(e.text)
-      return { value: { isCopied: true } }
-    })
-    on('ui.toast', () => ({ value: undefined }))
-    on('ui.render', ($, e) => {
-      const { Text } = $.ui.resolve(e)
-      return <Text>focus</Text>
-    })
-    on('classic.UserPromptSubmit', () => ({})) // no settings hook beneath
-
-    await $.classic.UserPromptSubmit({ prompt: 'hi', transcript_path: PATH })
-    await $.classic.UserPromptSubmit({
-      prompt: 'sub',
-      transcript_path: 'C:\elsewhere\agent.jsonl',
-      agent_id: 'a1',
-    })
-
-    const footer = await $.ui.mount({ ...FOOTER, surface: 'desktop' })
-    await footer.press({ key: 'copy-transcript' })
-    expect(copied).toEqual([PATH])
-    await footer.unmount()
-  })
-
-  test('says when the path is not known yet, and copies nothing', async ($, on) => {
-    const copied: string[] = []
-    const toasts: string[] = []
-    on('ui.copy', (_, e) => {
-      copied.push(e.text)
-      return { value: { isCopied: true } }
-    })
-    on('ui.toast', (_, e) => {
-      toasts.push(e.text)
-      return { value: undefined }
-    })
-    on('ui.render', ($, e) => {
-      const { Text } = $.ui.resolve(e)
-      return <Text>focus</Text>
-    })
-
-    const footer = await $.ui.mount({ ...FOOTER, surface: 'desktop' })
-    await footer.press({ key: 'copy-transcript' })
-
-    expect(copied).toEqual([])
-    expect(toasts).toEqual(["The transcript's path is known from your next prompt"])
-    await footer.unmount()
+    // Checked again, then cleared from the last row.
+    await reply.press({ key: 'pick-1' })
+    await pane.pointer({ type: 'down', x: 4, y: 7, button: 'left', in: CARD })
+    expect(await cardTexts(pane)).toContain('Tick ☐ on a part of a reply to collect it.')
+    expect(copied).toHaveLength(1)
+    await pane.unmount()
+    await reply.unmount()
   })
 })

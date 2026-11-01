@@ -1,12 +1,25 @@
 {
   "name": "claude-mods",
   "owner": { "name": "416rehman" },
-  "description": "Mods for Claude Code.",
+  "description": "Mods and skills for Claude Code. The mods carry the shared Mods sidebar: install any one, and every installed one gets a section there.",
   "plugins": [
     {
-      "name": "copy-kit",
-      "source": "./copy-kit",
-      "description": "Copy any section of a reply, or check several and copy them together, and copy the path of the conversation's transcript."
+      "name": "cherrypick",
+      "source": "./cherrypick",
+      "description": "Copy any part of a Claude reply: one paragraph, quote, code block or heading without its markdown markers, or several sections checked and copied together.",
+      "keywords": ["copy", "copy code", "copy quote", "copy section", "copy message", "clipboard", "markdown"]
+    },
+    {
+      "name": "whereabouts",
+      "source": "./whereabouts",
+      "description": "Where this Claude Code conversation lives: its transcript path, folder, session ID, working directory, branch and model, each one click to copy, in the Mods sidebar or with /transcript.",
+      "keywords": ["transcript", "transcript path", "copy path", "session id", "copy", "conversation", "session", "jsonl"]
+    },
+    {
+      "name": "cleanup",
+      "source": "./cleanup",
+      "description": "A /cleanup skill that keeps AI slop out of PRs: it trims comments to the ones that carry a why, matches the codebase's comment conventions, and puts constants and types before the code that uses them. A commit hook runs it on everything Claude commits.",
+      "keywords": ["cleanup", "code cleanup", "comments", "comment cleanup", "ai slop", "pull request", "code review", "commit hook"]
     }
   ]
 }

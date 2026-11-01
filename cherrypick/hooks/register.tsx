@@ -1,17 +1,22 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderSurface } from 'claude-code'
 
-import type { CopyKitPick } from '../types'
+import type { CherrypickPick } from '../types'
 import { splitSections } from './sections'
 import type { Section, SectionKind } from './sections'
+import {
+  noteFilter,
+  readSectionPost,
+  sectionCard,
+  toggleFold,
+  withModsButton,
+  withModsSection,
+} from './shared/panel'
+import type { SectionRow } from './shared/panel'
 
-const transcriptPath = atom(
-  { plugin: 'copy-kit', key: 'transcriptPath' } as const,
-  null,
-)
 // Change the tag when a pick's fields change: it declines what an earlier
 // version stored, which outlives a reload.
-const picks = atom({ plugin: 'copy-kit', key: 'picks' } as const, [], {
+const picks = atom({ plugin: 'cherrypick', key: 'picks' } as const, [], {
   shape: 'picks-2',
 })
 
@@ -165,7 +170,7 @@ export const register: Register = on => {
   on('ui.fault', ($, e, next) => {
     if (e.module.endsWith('copy-icon.tsx') && !isIconRefused) {
       isIconRefused = true
-      $.ui.log(`copy-kit: the copy icon was refused (${e.reason}); copy marks show a glyph`, {
+      $.ui.log(`cherrypick: the copy icon was refused (${e.reason}); copy marks show a glyph`, {
         to: 'debug',
       })
     }
@@ -208,64 +213,81 @@ export const register: Register = on => {
     )
   })
 
-  on('session.start', async ($, e, next) => {
-    const result = await next(e)
-    await $.command.register({
-      name: 'transcript',
-      description: 'Copy the path of the file this conversation is stored in',
-    })
-    // The classic events carry the path from the next prompt on; a mod loaded
-    // into a running session finds the file the session already writes.
-    if ((await read($, transcriptPath)) === null) {
-      const found = await locateTranscript($)
-      if (found !== null) await update($, transcriptPath, known => known ?? found)
-    }
-    return result
+  // The footer's Mods button and the Mods sidebar, shared with the other mods.
+  on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
+    if (e.surface !== 'desktop') return next(e)
+    return withModsButton($, $.ui.resolve(e), await next(e))
   })
 
-  on('command.run', { command: 'transcript' }, async $ => {
-    await copyTranscriptPath($)
+  on('ui.render', { component: 'Pane', requestId: 'claude-mods' }, async ($, e, next) => {
+    if (e.surface !== 'desktop') return next(e)
+    const el = $.ui.resolve(e)
+    const heading = { plugin: 'cherrypick', icon: 'checklist', title: 'Cherrypick' } as const
+    return withModsSection(el, await next(e), sectionCard(el, heading, cherrypickRows(await read($, picks))))
+  })
+
+  // A click on a row of this mod's section: a checked one is removed; the last
+  // two copy all of them or clear them.
+  on('ui.message', { component: 'Pane' }, async ($, e, next) => {
+    const post = readSectionPost(e.data)
+    if (post === null) return next(e)
+    if (post.kind === 'toggle') toggleFold($)
+    else if (post.id === 'copy') await copyPicks($, e.surface)
+    else if (post.id === 'clear') await update($, picks, () => [])
+    else {
+      const pick = (await read($, picks)).find(one => pickId(one) === post.id)
+      if (pick !== undefined) await unpick($, pick.message, pick.index)
+    }
     return {}
   })
 
-  // A quiet entry after the footer's own line: one press copies the path.
-  // Other plugins draw this site too (a launcher, the mode labels), so what
-  // they drew comes first and whole; the desktop keeps the site to one line
-  // and cuts its end with an ellipsis, so this entry stays one short word.
-  on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
-    if (e.surface !== 'desktop') return next(e)
-
-    const theirs = await next(e)
-    const { Box, Button } = $.ui.resolve(e)
-
-    return (
-      <Box flexDirection="row" alignItems="center" columnGap={1}>
-        {theirs}
-        <Box flexShrink={0}>
-          <Button
-            key="copy-transcript"
-            label="Transcript"
-            plain
-            dimColor
-            onPress={press => copyTranscriptPath($, press.surface)}
-          />
-        </Box>
-      </Box>
-    )
+  on('ui.input', { element: 'claude-mods-filter' }, async ($, e, next) => {
+    noteFilter($, e.value)
+    return next(e)
   })
+}
 
-  // Remembering the path never holds up or refuses the session's own hooks.
-  on('classic.SessionStart', async ($, e, next) => {
-    const result = await next(e)
-    await remember($, e.transcript_path, e.agent_id)
-    return result
-  }).catch(($, e, next) => next(e))
+const KIND_LABEL: Record<SectionKind, string> = {
+  quote: 'Quote',
+  code: 'Code',
+  heading: 'Heading',
+  rule: 'Rule',
+  text: 'Text',
+}
 
-  on('classic.UserPromptSubmit', async ($, e, next) => {
-    const result = await next(e)
-    await remember($, e.transcript_path, e.agent_id)
-    return result
-  }).catch(($, e, next) => next(e))
+/** This mod's section of the Mods sidebar: the checked sections, then what to do with them. */
+function cherrypickRows(checked: readonly CherrypickPick[]): SectionRow[] {
+  if (checked.length === 0) {
+    return [{ id: 'empty', icon: 'info', label: "Tick ☐ on a part of a reply to collect it.", isHint: true }]
+  }
+  const list = [...checked].sort((a, b) => a.messageOrder - b.messageOrder || a.index - b.index)
+  const count = list.length === 1 ? '1 section' : `${list.length} sections`
+  return [
+    ...list.map(
+      (pick): SectionRow => ({
+        id: pickId(pick),
+        icon: 'check',
+        label: KIND_LABEL[pick.kind as SectionKind] ?? 'Text',
+        value: firstLine(pick.plain),
+        trailing: 'x',
+      }),
+    ),
+    { id: 'copy', icon: 'copy', label: `Copy ${count}` },
+    { id: 'clear', icon: 'x', label: 'Clear checks' },
+  ]
+}
+
+function pickId(pick: CherrypickPick): string {
+  return `pick:${pick.message}:${pick.index}`
+}
+
+/** A section's first line, as the sidebar previews it. */
+function firstLine(text: string): string {
+  return text.split('\n').find(line => line.trim() !== '')?.trim() ?? ''
+}
+
+async function unpick($: EngineInterface, message: string, index: number) {
+  await update($, picks, list => list.filter(one => one.message !== message || one.index !== index))
 }
 
 async function toggle($: EngineInterface, message: string, index: number, section: Section) {
@@ -289,21 +311,12 @@ function copiedIndex(data: unknown): number | null {
   return typeof data.copy === 'number' ? data.copy : null
 }
 
-async function copyTranscriptPath($: EngineInterface, surface?: RenderSurface) {
-  const path = await read($, transcriptPath)
-  if (path === null) {
-    $.ui.toast("The transcript's path is known from your next prompt")
-    return
-  }
-  await copy($, path, surface, 'Transcript path copied')
-}
-
 /**
  * The checked sections in the order the replies show them, a blank line apart.
  * Sections all of one kind copy without their markers; a mix keeps every
  * section's markdown, so a code block stays a code block beside the text.
  */
-function joinPicks(list: readonly CopyKitPick[]): string {
+function joinPicks(list: readonly CherrypickPick[]): string {
   const isOneKind = new Set(list.map(one => one.kind)).size === 1
   return [...list]
     .sort((a, b) => a.messageOrder - b.messageOrder || a.index - b.index)
@@ -327,60 +340,9 @@ async function copyPicks($: EngineInterface, surface: RenderSurface) {
 async function copy(
   $: EngineInterface,
   text: string,
-  surface: RenderSurface | undefined,
+  surface: RenderSurface,
   done: string,
 ) {
   const copied = await $.ui.copy({ text, surface })
   $.ui.toast(copied.isCopied ? done : `Nothing was copied (${copied.reason})`)
-}
-
-async function remember(
-  $: EngineInterface,
-  path: string | undefined,
-  agentId: string | undefined,
-) {
-  if (agentId !== undefined || !path) return
-  await update($, transcriptPath, () => path)
-}
-
-/**
- * The transcript is `<config>/projects/<project folder>/<session id>.jsonl`.
- * The project folder's name is derived from the directory the session started
- * in, so look in the folders named after this session's directories first,
- * then in every project folder.
- */
-async function locateTranscript($: EngineInterface): Promise<string | null> {
-  const home = (await $.env.get('USERPROFILE')) ?? (await $.env.get('HOME'))
-  const config =
-    (await $.env.get('CLAUDE_CONFIG_DIR')) ??
-    (home === undefined ? undefined : join(home, '.claude'))
-  if (config === undefined) return null
-
-  const projects = join(config, 'projects')
-  const file = `${await $.session.id()}.jsonl`
-  const likely = [await $.session.root(), await $.session.cwd()].map(dir =>
-    dir.replace(/[^a-zA-Z0-9]/g, '-'),
-  )
-  const listed = await $.fs.list(projects).catch(() => [])
-  const folders = [
-    ...new Set([
-      ...likely,
-      ...listed.filter(entry => entry.kind === 'dir').map(entry => entry.name),
-    ]),
-  ]
-
-  for (const folder of folders) {
-    const candidate = join(projects, folder, file)
-    if (await $.fs.exists(candidate)) return candidate
-  }
-  return null
-}
-
-function separatorOf(path: string): string {
-  return path.includes('\\') ? '\\' : '/'
-}
-
-function join(base: string, ...parts: string[]): string {
-  const sep = separatorOf(base)
-  return [base.replace(/[\\/]+$/, ''), ...parts].join(sep)
 }

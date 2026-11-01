@@ -1,25 +1,47 @@
 # claude-mods
 
-Mods for Claude Code.
+Mods and skills for Claude Code. Install any of them on its own. The mods each bring the shared **Mods** sidebar, and every one you install gets a section there.
 
-## copy-kit
+| Plugin | What it does |
+| --- | --- |
+| [cherrypick](#cherrypick) | Copy any part of a Claude reply: one section, or several at once |
+| [whereabouts](#whereabouts) | Where this conversation lives: transcript, folder, session ID, branch, model, each one click to copy |
+| [cleanup](#cleanup) | A `/cleanup` skill that keeps AI slop out of PRs, run automatically before every commit |
+
+## The Mods sidebar
+
+**Mods** in the desktop app's prompt footer opens a sidebar with a filter at the top and a section for each installed mod, with the app's own icons. However many of these mods you install, there is one button and one sidebar: the mods settle between them which one draws the button and the filter.
+
+## cherrypick
 
 Copy exactly the part of a reply you want, in the Claude desktop app.
 
 - **Copy one section.** Hover a paragraph, list, table, quote, code block or heading and it lifts a shade; click the copy icon at its right edge. A quote copies without its `>` markers, a code block without its fences, a heading without its `#`. The icon turns to a check for a moment.
-- **Copy several.** Tick the checkbox beside each section you want. A bar above the prompt counts them, with **Copy** and **Clear**. Sections of one kind copy without their markers; a mix keeps every section's markdown, so a code block stays a code block beside the text. Copying clears the ticks.
-- **Copy the transcript path.** **Transcript** in the prompt footer copies the path of the file the conversation is stored in. `/transcript` does the same.
+- **Copy several.** Tick the checkbox beside each section you want. A bar above the prompt counts them, with **Copy** and **Clear**, and the Cherrypick section of the Mods sidebar lists them, each with **Remove**. Sections of one kind copy without their markers; a mix keeps every section's markdown, so a code block stays a code block beside the text. Copying clears the ticks.
 
-In VS Code, the copy icon is the ⧉ glyph and sections do not tint; in the terminal, replies keep their own drawing and `/transcript` copies the path.
+In VS Code, the copy icon is the ⧉ glyph and sections do not tint; in the terminal, replies keep their own drawing.
 
-The copy and check icons are traced from the Claude desktop app's own icon font, so the mark matches the app's copy button.
+## whereabouts
+
+The Whereabouts section of the Mods sidebar shows where the conversation lives, each part one click to copy: its transcript file, the folder that holds it, the session ID, the working directory and project root, the git branch and remote, and the model. **Open** shows the transcript in your file manager. `/transcript` copies the transcript's path, in the terminal too.
+
+## cleanup
+
+A skill, `/cleanup`, with no UI. It goes over the code the current branch adds over its base, and only that code, so a PR carries no slop:
+
+- **Placement.** Constants and statics at the top, types before the functions and methods that use them, new members beside their kind. Behaviour-preserving moves only, verified by the build and tests.
+- **Comments.** Narration, change-log notes and pointers to moving targets go; a comment that explains *what* becomes clearer code instead; a comment that carries a *why* stays, trimmed. Comment conventions come from the codebase: where its struct fields are documented, a new field is too, and where they aren't, no comment is added. Readable code first.
+
+A commit hook runs it for you: every `git commit` Claude makes that adds source lines is held until the pass has covered exactly what is being committed. `/cleanup <branch>` targets a PR into another branch; `/cleanup <file>` covers a whole file.
 
 ## Install
 
 At the prompt of a terminal session:
 
 ```
-/plugin install copy-kit --marketplace 416rehman/claude-mods
+/plugin install cherrypick --marketplace 416rehman/claude-mods
+/plugin install whereabouts --marketplace 416rehman/claude-mods
+/plugin install cleanup --marketplace 416rehman/claude-mods
 ```
 
 Answer `y` to add the marketplace, then pick a scope.
@@ -27,7 +49,21 @@ Answer `y` to add the marketplace, then pick a scope.
 From a shell:
 
 ```
-claude plugin install copy-kit --marketplace 416rehman/claude-mods
+claude plugin install cherrypick --marketplace 416rehman/claude-mods
+claude plugin install whereabouts --marketplace 416rehman/claude-mods
+claude plugin install cleanup --marketplace 416rehman/claude-mods
 ```
 
 In the desktop app, where `/plugin` does not run: click **+** next to the prompt box, then **Plugins**, **Add marketplace** with `416rehman/claude-mods`, then **Add plugin**.
+
+## Developing
+
+The sidebar's code lives once, in `shared/`, and each mod with a hooks module carries a copy in `hooks/shared/`. After changing it:
+
+```
+node scripts/sync-shared.mjs
+```
+
+`node scripts/sync-shared.mjs --check` fails when a copy differs. `shared/icons.ts` is generated from the desktop app's icon font by `scripts/make-icons.py`. Each mod's tests run with `claude plugin test <mod>`.
+
+The copy, check and sidebar icons are traced from the Claude desktop app's own icon font, so they match the app's.

@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/cleanup-gate.js\"",
+            "timeout": 15,
+            "statusMessage": "cleanup gate"
+          }
+        ]
+      }
+    ]
+  }
+}

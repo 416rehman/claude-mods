@@ -1,5 +1,5 @@
 /** One section the person checked, in both of the forms a copy can take. */
-export type CopyKitPick = {
+export type CherrypickPick = {
   /** The reply block it is in (the render site's requestId). */
   message: string
   /** Its place among the block's sections. */
@@ -16,11 +16,9 @@ export type CopyKitPick = {
 
 declare module 'claude-code' {
   interface PluginState {
-    'copy-kit': {
-      /** The main conversation's transcript file, absolute; null until known. */
-      transcriptPath: string | null
+    cherrypick: {
       /** The checked sections, in the order they were checked. */
-      picks: Shaped<CopyKitPick[]>
+      picks: Shaped<CherrypickPick[]>
     }
   }
 }

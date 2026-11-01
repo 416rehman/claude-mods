@@ -1,0 +1,7 @@
+{
+  "name": "whereabouts",
+  "version": "0.1.0",
+  "description": "Copy the transcript path of a Claude Code conversation in one click: a Transcript button in the desktop prompt footer, and /transcript, copy where the conversation's .jsonl transcript file is stored.",
+  "keywords": ["transcript", "transcript path", "copy path", "copy", "conversation", "session", "jsonl", "clipboard"],
+  "types": "./types/index.d.ts"
+}
