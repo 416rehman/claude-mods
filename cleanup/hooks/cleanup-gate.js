@@ -10,7 +10,10 @@
  * The sign-off, <git-dir>/cleanup.ok, holds the sha256 of `git diff --cached`
  * ("cached") and of `git diff HEAD` ("tracked"). A plain commit must match
  * "cached"; `commit -a` or a commit with pathspecs must match "tracked". Commits
- * that add no lines to source files are never gated.
+ * that add no lines to source files need no pass.
+ *
+ * Every commit's message is checked too: one line, and no AI credit. Matching
+ * the repo's own commit style is the skill's job, not this script's.
  *
  * Once it has found a commit, a check that fails (git timed out, say) denies it:
  * a gate that lets a commit through whenever git is slow checks nothing.
@@ -41,8 +44,21 @@ const GIT_EXE = /(^|[\\/])git(\.exe)?$/i;
 const CD_WORDS = new Set(['cd', 'chdir', 'pushd', 'set-location', 'sl']);
 const GIT_OPT_WITH_VALUE = new Set(['-C', '-c', '--exec-path', '--namespace', '--super-prefix', '--git-dir', '--work-tree']);
 const ADD_INTERACTIVE = new Set(['-p', '--patch', '-i', '--interactive', '-e', '--edit']);
-const COMMIT_OPT_WITH_VALUE = new Set(['-m', '-F', '-t', '-C', '-c', '--message', '--file', '--template',
+const COMMIT_OPT_WITH_VALUE = new Set(['-t', '-C', '-c', '--template',
   '--author', '--date', '--fixup', '--squash', '--cleanup', '--trailer', '--reuse-message', '--reedit-message']);
+// Read from the raw command, since a quote inside one would end a word early
+// for splitCommands. Each is replaced by `stands` before the split.
+const HEREDOCS = [
+  { pattern: /\$\(\s*cat\s+<<-?\s*(['"]?)(\w+)\1[^\n]*\n(?<text>[\s\S]*?)\n\s*\2\s*\)/, stands: 'HEREDOC' }, // bash -m "$(cat <<'EOF' ...)"
+  { pattern: /@(['"])\r?\n(?<text>[\s\S]*?)\r?\n\1@/, stands: 'HEREDOC' }, // PowerShell -m @' ... '@
+  { pattern: /<<-?\s*(['"]?)(\w+)\1[^\n]*\n(?<text>[\s\S]*?)\n\s*\2\s*(?:\n|$)/, stands: '' }, // bash -F - <<'EOF'
+];
+const AI_CREDIT = [
+  /^\s*co-authored-by:.*(claude|anthropic|openai|chatgpt|copilot|gemini|cursor|codex|\bgpt)/im,
+  /generated (with|by)\b.*\b(claude|chatgpt|copilot|gemini|cursor|codex|gpt|ai)\b/i,
+  /\u{1F916}/u,
+  /claude\.(com|ai)\/(claude-)?code/i,
+];
 
 function log(message) {
   try { fs.appendFileSync(LOG, `${new Date().toISOString()} ${message}\n`); } catch (_) { /* nowhere to report */ }
@@ -106,11 +122,15 @@ function splitCommands(line) {
   return commands.filter((words) => words.length);
 }
 
-// The first `git commit`, with the directory it runs in and the `git add`s chained before it.
+// The first `git commit`, with the directory it runs in, the `git add`s chained
+// before it, and its message, or null where the gate can't see one (an editor,
+// a reused message).
 function findCommit(command, startDir) {
+  const heredoc = HEREDOCS.map(({ pattern, stands }) => ({ match: pattern.exec(command), stands })).find(({ match }) => match);
+  const withoutHeredoc = heredoc ? command.replace(heredoc.match[0], heredoc.stands) : command;
   let dir = startDir;
   const adds = [];
-  for (const words of splitCommands(command)) {
+  for (const words of splitCommands(withoutHeredoc)) {
     const head = words[0].toLowerCase();
     if (CD_WORDS.has(head)) {
       const target = words.slice(1).find((w) => !w.startsWith('-'));
@@ -132,20 +152,37 @@ function findCommit(command, startDir) {
       if (rest.some((w) => ADD_INTERACTIVE.has(w))) return null;
       adds.push({ dir: runDir, args: rest });
     } else if (subcommand === 'commit') {
-      let all = false;
-      let dryRun = false;
+      const commit = { dir: runDir, all: false, dryRun: false, adds, message: null };
+      const messages = [];
+      let messageFile = null;
       for (let j = 0; j < rest.length; j++) {
         const w = rest[j];
-        if (w === '--') { if (j + 1 < rest.length) all = true; break; }
-        if (w === '--all') all = true;
-        else if (w === '--dry-run') dryRun = true;
+        if (w === '--') { if (j + 1 < rest.length) commit.all = true; break; }
+        if (w === '--all') commit.all = true;
+        else if (w === '--dry-run') commit.dryRun = true;
+        else if (w === '-m' || w === '--message') messages.push(rest[++j] || '');
+        else if (w.startsWith('--message=')) messages.push(w.slice('--message='.length));
+        else if (w === '-F' || w === '--file') messageFile = rest[++j] || null;
+        else if (w.startsWith('--file=')) messageFile = w.slice('--file='.length);
         else if (COMMIT_OPT_WITH_VALUE.has(w)) j++;
-        else if (/^-[a-zA-Z]+$/.test(w)) {
-          if (w.includes('a')) all = true;
-          if (/[mFCct]/.test(w)) j++;
-        } else if (!w.startsWith('-')) all = true; // pathspec: commits working-tree content
+        else if (/^-[a-zA-Z]/.test(w) && !w.startsWith('--')) {
+          // A cluster like -am: its value is the rest of the cluster, or the next word.
+          for (let k = 1; k < w.length; k++) {
+            if (w[k] === 'a') commit.all = true;
+            if (!'mFCct'.includes(w[k])) continue;
+            const value = k + 1 < w.length ? w.slice(k + 1) : rest[++j];
+            if (w[k] === 'm') messages.push(value || '');
+            if (w[k] === 'F') messageFile = value || null;
+            break;
+          }
+        } else if (!w.startsWith('-')) commit.all = true; // pathspec: commits working-tree content
       }
-      return { dir: runDir, all, dryRun, adds };
+      if (heredoc && (messages.includes('HEREDOC') || messageFile === '-')) commit.message = heredoc.match.groups.text;
+      else if (messages.length) commit.message = messages.join('\n\n');
+      else if (messageFile && messageFile !== '-') {
+        try { commit.message = fs.readFileSync(path.resolve(runDir, nativePath(messageFile)), 'utf8'); } catch (_) { /* git reports the missing file */ }
+      }
+      return commit;
     }
   }
   return null;
@@ -215,7 +252,31 @@ function writeMarker(repo, diff) {
   fs.writeFileSync(markerPath(repo), `cached ${sha(diff.cached)}\ntracked ${sha(diff.tracked)}\n`);
 }
 
-function reason(repo, commit, files) {
+function messageReason(message) {
+  const problems = [];
+  if (AI_CREDIT.some((pattern) => pattern.test(message))) problems.push('it credits an AI tool (a Co-Authored-By line, a "Generated with" footer)');
+  if (message.trim().includes('\n')) problems.push('it has more than one line');
+  if (!problems.length) return null;
+  return `CLEANUP GATE: this commit's message breaks the cleanup rules: ${problems.join('; ')}. A commit message is one short line in plain words, with no body and no AI credit, written the way this repo's own commits are (see git log --oneline -15). Rewrite it and run the commit again.`;
+}
+
+// Why the commit needs a cleanup pass first, or null when it doesn't.
+function passReason(repo, commit) {
+  const scratchIndex = replayAdds(repo, commit.adds);
+  const env = scratchIndex ? { GIT_INDEX_FILE: scratchIndex } : undefined;
+  try {
+    const base = baseRef(repo);
+    const files = codeFilesWithAddedLines(repo, base, commit.all, env);
+    if (!files.length) return null;
+    const diff = diffs(repo, base, env);
+    const key = commit.all ? 'tracked' : 'cached';
+    return readMarker(repo)[key] === sha(diff[key]) ? null : passSteps(repo, commit, files);
+  } finally {
+    if (scratchIndex) { try { fs.unlinkSync(scratchIndex); } catch (_) { /* already gone */ } }
+  }
+}
+
+function passSteps(repo, commit, files) {
   const target = commit.all ? 'tracked' : 'staged';
   const diffCommand = commit.all ? 'git diff HEAD' : 'git diff --cached';
   const list = files.slice(0, 8).join(', ') + (files.length > 8 ? `, +${files.length - 8} more` : '');
@@ -225,7 +286,7 @@ function reason(repo, commit, files) {
   steps.push('git add every file the pass edited, so the cleaned version is what gets committed.');
   steps.push(`Sign off: node "${__filename.replace(/\\/g, '/')}" --mark "${repo.top}"`);
   return [
-    `CLEANUP GATE: this commit adds source lines in ${files.length} file(s) (${list}) that have not had a cleanup pass. Do these steps in order, then re-run the same commit command:`,
+    `CLEANUP GATE: this commit adds source lines in ${files.length} file(s) (${list}) that have not had a cleanup pass. Do these steps in order, then run the commit again:`,
     ...steps.map((step, i) => `${i + 1}. ${step}`),
     'The gate checks before a command runs, so sign off in its own tool call and commit in the next one; a sign-off chained into the commit command is not seen. Any later edit needs another pass. Never sign off without running the pass.',
   ].join('\n');
@@ -258,19 +319,8 @@ function check(command, cwd) {
   if (!commit || commit.dryRun) return;
   const repo = resolveRepo(commit.dir);
   if (!repo) return;
-  const scratchIndex = replayAdds(repo, commit.adds);
-  const env = scratchIndex ? { GIT_INDEX_FILE: scratchIndex } : undefined;
-  try {
-    const base = baseRef(repo);
-    const files = codeFilesWithAddedLines(repo, base, commit.all, env);
-    if (!files.length) return;
-    const diff = diffs(repo, base, env);
-    const key = commit.all ? 'tracked' : 'cached';
-    if (readMarker(repo)[key] === sha(diff[key])) return;
-    deny(reason(repo, commit, files));
-  } finally {
-    if (scratchIndex) { try { fs.unlinkSync(scratchIndex); } catch (_) { /* already gone */ } }
-  }
+  const reasons = [commit.message === null ? null : messageReason(commit.message), passReason(repo, commit)];
+  if (reasons.some(Boolean)) deny(reasons.filter(Boolean).join('\n\n'));
 }
 
 function hook() {

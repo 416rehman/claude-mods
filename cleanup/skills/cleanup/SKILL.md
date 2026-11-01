@@ -1,6 +1,6 @@
 ---
 name: cleanup
-description: Clean up the code a branch adds before it becomes a PR, to keep AI slop out of it - redundant complexity (near-copies, derivable state, deep nesting, wasted work, parameters wider than what a function reads, helpers the codebase already has), vague or jargon names, narration and change-log comments, slop words (sentinel, guard, em dashes), comments standing in for unclear code, and declarations left wherever they happened to be typed. No comment beats a comment - code that needs one to be read is fixed instead, and the few that stay carry a why in plain, short words. Follows the codebase's own conventions (where its struct fields are documented, a new field is too), applies the CLAUDE.md rules that govern the code, and puts constants and statics at the top and types before the code that uses them. Use when the user asks to clean up, tidy, de-slop, simplify, or prep code for a PR or commit, mentions too many or verbose comments or a comment pass, asks to organize a file's declarations, or runs /cleanup; and whenever the cleanup commit gate blocks a git commit.
+description: Clean up the code a branch adds before it becomes a PR, to keep AI slop out of it - redundant complexity (near-copies, derivable state, deep nesting, wasted work, parameters wider than what a function reads, helpers the codebase already has), vague or jargon names, narration and change-log comments, slop words (sentinel, guard, em dashes), comments standing in for unclear code, and declarations left wherever they happened to be typed. No comment beats a comment - code that needs one to be read is fixed instead, and the few that stay carry a why in plain, short words. Follows the codebase's own conventions (where its struct fields are documented, a new field is too), applies the CLAUDE.md rules that govern the code, keeps commit messages to one line in the repo's own form with no AI credit, and puts constants and statics at the top and types before the code that uses them. Use when the user asks to clean up, tidy, de-slop, simplify, or prep code for a PR or commit, mentions too many or verbose comments or a comment pass, asks to organize a file's declarations, or runs /cleanup; and whenever the cleanup commit gate blocks a git commit.
 ---
 
 # Cleanup
@@ -399,9 +399,29 @@ the pass:
    command is never seen.
 
 Commits whose diff adds no lines to source files (docs, config, pure
-deletions) are never gated. When the gate can't check a commit (git too slow,
-say), it denies it and says why: run the command again. Never sign off without
-running the pass: the sign-off is the pass's signature, not a bypass.
+deletions) need no pass, but every commit's message is checked (see "Commit
+messages"). When the gate can't check a commit (git too slow, say), it denies
+it and says why: run the command again. Never sign off without running the
+pass: the sign-off is the pass's signature, not a bypass.
+
+## Commit messages
+
+A commit message is held to the same standard as the code:
+
+- **The repo's own form.** Read its recent history (`git log --oneline -15`)
+  and write the line the way those commits are written: whatever prefix or
+  scope scheme, ticket references, tense, casing and length they use. A
+  written rule (CLAUDE.md, CONTRIBUTING) wins over history. With no pattern
+  to follow, a plain imperative sentence.
+- **One short line.** No body, no trailers.
+- **No AI credit**, whatever the history does: no Co-Authored-By naming an AI,
+  no "Generated with" footer, no robot emoji, no mention of the tool that
+  wrote it. A commit that carries one is not a pattern to copy.
+- **Plain words**, as for names and comments, and no change narration ("as
+  requested", "per review").
+
+The gate checks the two parts a script can (one line, no AI credit) on every
+commit Claude runs; the form is yours to match.
 
 ## Output
 
